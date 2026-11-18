@@ -150,6 +150,8 @@
   .alertbox .ai .k.big{background:#4a1c1c;color:#ff9d9d;}
   .alertbox .ai .p{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted);word-break:break-all;cursor:copy;}
   .alertbox .ai .p:hover{color:var(--accent);}
+  .alertbox .ai .cmd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#1b1f2a;border:1px solid var(--border);border-radius:4px;padding:0 6px;color:var(--text);word-break:break-all;cursor:copy;}
+  .alertbox .ai .cmd:hover{border-color:var(--accent);}
   .alertbox .ai a{color:var(--text);cursor:pointer;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;text-decoration:underline dotted;}
   .alertbox .ai a:hover{color:var(--accent);}
   .insp .size.big{color:#ff9d9d;font-weight:600;}
@@ -380,7 +382,8 @@ const I18N = {
     nr_dep: "（依赖的 job 失败 / 取消了，这个永远等不到；scancel 掉重交）",
     nr_time: "（申请的时长超过分区上限，scontrol update 改短或者换分区）",
     nr_nodes: "（节点数不在分区允许范围，或者要的节点下线了）",
-    nr_constraint: "（--constraint 之类的要求没有节点能满足）",
+    nr_constraint: "（--constraint 之类的要求没有节点能满足；常常是节点临时下线，Slurm 把优先级设成 0 后不会自己恢复）",
+    al_release: "试试放出来：", al_release_tip: "点击复制，在集群上运行。还是变回不会开始的话，说明确实没有节点满足要求，要改提交参数", copied_cmd: "已复制命令",
     nr_qos: "（这个 QoS 不能用在这个分区 / 账户）",
     nr_held: "（被 hold 了，scontrol release 放出来）", nr_held_admin: "（被管理员 hold 了）",
     never_run_cell: "不会开始",
@@ -557,7 +560,8 @@ const I18N = {
     nr_dep: "(a job it depends on failed / was cancelled; scancel and resubmit)",
     nr_time: "(time limit exceeds the partition's; shorten it with scontrol update or use another partition)",
     nr_nodes: "(node count outside the partition's limits, or required nodes are down)",
-    nr_constraint: "(no node satisfies --constraint etc.)",
+    nr_constraint: "(no node satisfies --constraint etc.; often nodes were briefly down, and Slurm set priority to 0 and won't undo it)",
+    al_release: "try releasing:", al_release_tip: "Click to copy, run it on the cluster. If they go back to won't-start, no node really fits the request: change the job", copied_cmd: "Command copied",
     nr_qos: "(this QoS isn't allowed in this partition / account)",
     nr_held: "(held; scontrol release it)", nr_held_admin: "(held by an admin)",
     never_run_cell: "won't start",
@@ -1537,7 +1541,7 @@ function renderAlerts(){
   const path = a => `<span class="p" data-copy="${esc(a.dir)}" title="${t("click_copy_path")}">${esc(a.dir)}</span>`;
   const limitFiles = (lastData.settings || {}).dir_files_warn || 50;
   const item = a => a.type === "never_run"
-    ? `<div class="ai"><span class="k big">${t("al_never_run")}</span><b>${esc(a.cluster)}</b> ${esc(a.reason)}${NEVER_TIP[a.reason] ? ` <span class="muted">${t(NEVER_TIP[a.reason])}</span>` : ""}: ${jobLinks(a)}${a.stale ? ` <span class="muted">${t("al_stale")}</span>` : ""}</div>`
+    ? `<div class="ai"><span class="k big">${t("al_never_run")}</span><b>${esc(a.cluster)}</b> ${esc(a.reason)}${NEVER_TIP[a.reason] ? ` <span class="muted">${t(NEVER_TIP[a.reason])}</span>` : ""}: ${jobLinks(a)}${a.stale ? ` <span class="muted">${t("al_stale")}</span>` : ""}${a.release ? ` <span class="muted">${t("al_release")}</span><span class="cmd" data-copy="${esc(a.release)}" data-copy-kind="cmd" title="${esc(t("al_release_tip"))}">${esc(a.release)}</span>` : ""}</div>`
     : a.type === "slow_loop"
     ? `<div class="ai"><span class="k big">${t("al_slow_loop")}</span><b>${esc(a.cluster)}</b> ${esc(tr(a.reason))}: ${jobLinks(a)} ${path(a)}</div>`
     : a.type === "waitlog_full"
@@ -1553,7 +1557,7 @@ function renderAlerts(){
 document.getElementById("alerts").addEventListener("click", e => {
   if (e.target.id === "alertsMore"){ alertsAll = !alertsAll; renderAlerts(); return; }
   const copy = e.target.closest("[data-copy]");
-  if (copy){ copyText(copy.dataset.copy).then(() => toast(t("copied_path"))); return; }
+  if (copy){ copyText(copy.dataset.copy).then(() => toast(t(copy.dataset.copyKind === "cmd" ? "copied_cmd" : "copied_path"))); return; }
   const jump = e.target.closest("[data-jump]");
   if (jump) jumpTo(jump.dataset.jump);
 });
@@ -1615,11 +1619,11 @@ document.querySelectorAll(".viewBtn").forEach(b => b.addEventListener("click", (
   savePref("views", views);
   render(); renderHistory();
 }));
-// 时间线：点一行切到表格并跳过去
+// 时间线：点一行切到表格并跳过去（只是这一次，不存偏好；刷新页面又回到图表）
 document.getElementById("ganttWrap").addEventListener("click", e => {
   const el = e.target.closest("[data-jump]");
   if (!el) return;
-  views.jobs = "data"; savePref("views", views);
+  views.jobs = "data";
   renderViewBtns(); renderJobs();
   jumpTo(el.dataset.jump);
 });

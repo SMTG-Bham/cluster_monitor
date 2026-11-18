@@ -11,3 +11,4 @@ waitlog/*.old
 waitlog/*.tmp
 waitlog_backups/
 models/
+dashboard.log

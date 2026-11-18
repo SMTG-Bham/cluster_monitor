@@ -22,6 +22,7 @@ Backend（app.py）只管 SSH、缓存、合并结果、给前端的数据；每
 - fairshare     你的 fairshare、优先级各项、排队的 job 前面还有多少（sshare / sprio）
 """
 
+import fnmatch
 import re
 from abc import ABC, abstractmethod
 
@@ -37,6 +38,9 @@ class Scheduler(ABC):
     PARTITION_LOAD = False  # parse_combo_load 能给出全集群按 QoS × 分区的数字
     HISTORY_SECTION = ""    # 历史记录（已结束的 job）是 steps() 里的哪一段
     FEATURES = frozenset()
+    # 排队原因是这些（通配符）时，自己 release 一下就可能开始（比如节点临时下线造成的 BadConstraints）
+    RELEASABLE = ()
+    RELEASE_COMMAND = ""  # {ids} = 空格分开，{ids_csv} = 逗号分开；config.yaml 里 release_command 可以改
 
     def __init__(self, cluster, config):
         self.cluster = cluster
@@ -106,6 +110,13 @@ class Scheduler(ABC):
             "users": {有排队 job 的用户数, fairshare 比你高的有几个},
             "jobs": {jobid: 你排队中的 job 的优先级、各项、每个分区前面还有几个}}；拿不到返回 None"""
         return None
+
+    def release_command(self, reason, ids):
+        """reason 是用户自己能放出来的，返回放出命令（一条，所有 job），否则 None"""
+        tpl = self.cluster.get("release_command") or self.config.get("release_command") or self.RELEASE_COMMAND
+        if not tpl or not ids or not any(fnmatch.fnmatchcase(reason, p) for p in self.RELEASABLE):
+            return None
+        return tpl.format(ids=" ".join(ids), ids_csv=",".join(ids))
 
     def analyze_backlog(self, sections):
         """返回 (给前端的 result, 给 estimate_job 用的 model)"""

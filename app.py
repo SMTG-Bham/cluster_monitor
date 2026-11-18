@@ -29,6 +29,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -40,15 +41,17 @@ from flask import Flask, abort, jsonify, render_template, request
 import jobfiles
 import predictor
 import schedulers
+import sshutil
 import waitlog
 import textview
 from i18n import L, as_l, prefixed, suffixed
 from schedulers.base import ACTIVE, PENDING, dependency_sides, sort_jobid, waiting_on_dependency
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+if sys.stdout is None:  # Windows 计划任务用 pythonw 跑，没有控制台：输出写进 dashboard.log
+    sys.stdout = sys.stderr = open(os.path.join(APP_DIR, "dashboard.log"), "a", encoding="utf-8", buffering=1)
 CONFIG_PATH = os.path.join(APP_DIR, "config.yaml")
 EXAMPLE_CONFIG_PATH = os.path.join(APP_DIR, "config.example.yaml")
-ASKPASS = os.path.join(APP_DIR, "ssh_askpass_abort.sh")
 CACHE_PATH = os.path.join(APP_DIR, ".dashboard_cache.json")
 # 网页上改的设置（目前只有自动刷新间隔），比 config.yaml 优先
 SETTINGS_PATH = os.path.join(APP_DIR, ".dashboard_settings.json")
@@ -85,32 +88,16 @@ def run_ssh(ssh_host, remote_cmd, timeout):
     """跑一条远程命令，返回 (ok, stdout, stderr)。
     ok 只表示 SSH 本身连上了（返回码 255 是 ssh 自己的错误），
     远程各条命令成功与否由 split_sections 里的 @@ERR 标记判断。
-
-    不用 BatchMode=yes：它会直接拒绝 keyboard-interactive 认证，而 sulis 这种
-    "key + 2FA" 的集群，即使 2FA 还在有效期（不用输验证码），也要走一轮
-    keyboard-interactive。这里允许它，但一旦服务器真的要输入东西，
-    ssh_askpass_abort.sh 会直接杀掉 ssh（不发任何回答），抛 NeedInput。
-    start_new_session 让 ssh 没有控制终端，不会在你跑 app.py 的终端里弹提示。"""
-    env = dict(os.environ, SSH_ASKPASS=ASKPASS, SSH_ASKPASS_REQUIRE="force")
-    env.setdefault("DISPLAY", "none")  # 老版本 OpenSSH 只有设了 DISPLAY 才会用 SSH_ASKPASS
+    服务器要输入东西（2FA / 密码）时抛 NeedInput，怎么做到不卡住、不乱回答见 sshutil.py。"""
     try:
-        proc = subprocess.run(
-            ["ssh", "-o", "BatchMode=no", "-o", "KbdInteractiveAuthentication=yes",
-             "-o", "ConnectTimeout=10", ssh_host, remote_cmd],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-            start_new_session=True,
-        )
+        proc = sshutil.run(ssh_host, remote_cmd, timeout)
     except subprocess.TimeoutExpired:
         return False, "", "ssh timeout"
     except Exception as e:  # noqa: BLE001
         return False, "", str(e)
-    m = re.search(r"@@NEED_INPUT (.*)", proc.stderr)
-    if m:
-        raise NeedInput(m.group(1).strip() or "(prompt)")
+    prompt = sshutil.need_input(proc.stderr)
+    if prompt:
+        raise NeedInput(prompt)
     if proc.returncode == 255 or proc.returncode < 0:
         return False, "", proc.stderr.strip()[-300:]
     return True, proc.stdout, proc.stderr.strip()
@@ -726,10 +713,15 @@ class Backend:
         for j in jobs:
             if j.get("never_run") and j.get("live", True):
                 never.setdefault((j["cluster"], j["never_run"]), []).append(j)
+        ccfg = {c["name"]: c for c in self.config.get("clusters", [])}
         for (cluster, reason), js in sorted(never.items()):
-            out.append({"type": "never_run", "cluster": cluster, "reason": reason,
-                        "jobs": sorted((j["id"] for j in js), key=sort_jobid),
-                        "stale": any(j.get("stale") for j in js)})
+            ids = sorted((j["id"] for j in js), key=sort_jobid)
+            try:  # 自己能放出来的（BadConstraints、被自己 hold 的）给一条命令
+                release = schedulers.make(ccfg[cluster], self.config).release_command(reason, ids)
+            except (KeyError, ValueError):
+                release = None
+            out.append({"type": "never_run", "cluster": cluster, "reason": reason, "jobs": ids,
+                        "release": release, "stale": any(j.get("stale") for j in js)})
         # 1) 好几个 job 同时在同一个目录里跑（一般是 dependency 没设对）
         #    同一个 array job 的不同 task 共用目录是正常的，不算
         running = {}

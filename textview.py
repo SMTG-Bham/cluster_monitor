@@ -255,6 +255,8 @@ def alerts_text(state):
         t = a["type"]
         if t == "never_run":
             lines.append(f"- NEVER RUN  {a['cluster']}  reason {a['reason']}: {jobs}")
+            if a.get("release"):
+                lines.append(f"    try releasing (run on {a['cluster']}): {a['release']}")
         elif t == "same_dir":
             lines.append(f"- SAME FOLDER  {a['cluster']}  {len(a['jobs'])} jobs running in {a['dir']}: {jobs}")
         elif t == "big_dir":

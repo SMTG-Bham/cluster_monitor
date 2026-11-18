@@ -2,18 +2,24 @@
 """
 HPC Job Dashboard 交互式安装 / Interactive installer
 ====================================================
-    python3 install.py              # 交互式：选 python、生成 config.yaml、（可选）装 systemd 服务
-    python3 install.py --uninstall  # 停止并删除 systemd 服务
+    python3 install.py              # 交互式：选 python、生成 config.yaml、（可选）装成开机自启的服务
+    python3 install.py --restart    # 改了代码或 config.yaml 之后重启服务
+    python3 install.py --uninstall  # 停止并删除服务
 
-只用标准库，任何 python3 都能跑。生成 config.yaml 时以 config.example.yaml 为模板
-（保留注释），集群列表可以从 ~/.ssh/config 里选；可以顺便测试哪些 Host 上有 Slurm。
-装 systemd 服务那一步需要 sudo（会提示输密码）。
+只用标准库，任何 python3 都能跑（Windows 上用 python install.py）。生成 config.yaml 时以
+config.example.yaml 为模板（保留注释），集群列表可以从 ~/.ssh/config 里选；可以顺便测试哪些
+Host 上有 Slurm。服务按系统不同：
+- Linux：systemd 服务（需要 sudo，会提示输密码），开机自启、挂了自动重启
+- macOS：launchd 的 LaunchAgent（~/Library/LaunchAgents，不用 sudo），登录后自启、挂了自动重启
+- Windows：启动文件夹里放一个 .cmd（不用管理员），登录后用 pythonw 在后台跑，没有自动重启
 """
 
 import concurrent.futures
 import glob
 import json
 import os
+import platform
+import plistlib
 import re
 import shutil
 import socket
@@ -22,12 +28,21 @@ import sys
 import tempfile
 from datetime import datetime
 
+import sshutil
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 EXAMPLE = os.path.join(APP_DIR, "config.example.yaml")
 CONFIG = os.path.join(APP_DIR, "config.yaml")
-ASKPASS = os.path.join(APP_DIR, "ssh_askpass_abort.sh")
+ASKPASS = sshutil.ASKPASS
+APP = os.path.join(APP_DIR, "app.py")
+LOG = os.path.join(APP_DIR, "dashboard.log")  # macOS / Windows 的服务输出写在这里
+SYSTEM = platform.system()  # Linux / Darwin / Windows
 SERVICE = "hpc-dashboard"
 UNIT_PATH = f"/etc/systemd/system/{SERVICE}.service"
+LAUNCHD_LABEL = f"local.{SERVICE}"
+PLIST_PATH = os.path.expanduser(f"~/Library/LaunchAgents/{LAUNCHD_LABEL}.plist")
+STARTUP_CMD = os.path.join(os.environ.get("APPDATA", ""), r"Microsoft\Windows\Start Menu\Programs\Startup",
+                           f"{SERVICE}.cmd")
 DEFAULT_PYTHON = "/home/dx/intel/oneapi/intelpython/latest/envs/pymatgen250508/bin/python"
 
 LANG = "en"
@@ -73,6 +88,11 @@ MSG = {
     "keys_warn": ("注意：下面这些 key 设了密码，systemd 服务拿不到 ssh-agent，会连不上：{k}",
                   "Note: these keys have a passphrase; a systemd service can't use your ssh-agent, so it won't connect: {k}"),
     "svc_q": ("装成 systemd 服务（开机自启、挂了自动重启）吗？需要 sudo。", "Install as a systemd service (start on boot, restart on failure)? Needs sudo."),
+    "svc_q_mac": ("装成 launchd 服务（登录后自启、挂了自动重启）吗？不用 sudo。", "Install as a launchd agent (start at login, restart on failure)? No sudo needed."),
+    "svc_q_win": ("登录 Windows 后自动在后台启动吗？（放进启动文件夹，不用管理员）", "Start it in the background when you log in to Windows? (goes in the Startup folder, no admin needed)"),
+    "win_2fa": ("注意：Windows 上只能用 key 登录集群；要 2FA / 密码（keyboard-interactive）的集群会显示\"需要 2FA\"，这种请在 WSL 里跑。",
+                "Note: on Windows only key logins work; clusters that need 2FA / a password (keyboard-interactive) will show \"2FA needed\". Run the dashboard in WSL for those."),
+    "no_svc": ("这个系统（{s}）不支持自动装服务，请手动运行。", "Installing a service isn't supported on {s}; run it manually."),
     "port_busy": ("端口 {p} 现在被占用（可能是手动跑的 python app.py），先停掉它再装服务。继续吗？",
                   "Port {p} is in use (maybe a manually started python app.py); stop it before installing the service. Continue?"),
     "root": ("请用普通用户运行（需要时脚本会自己 sudo），服务要用你的 ssh 配置。", "Run as your normal user (the script sudo's when needed); the service needs your ssh config."),
@@ -82,6 +102,11 @@ MSG = {
     "done_url": ("网页：http://{h}:{p}", "Open: http://{h}:{p}"),
     "done_logs": ("看日志：journalctl -u {s} -f    改了代码或 config.yaml 之后：sudo systemctl restart {s}",
                   "Logs: journalctl -u {s} -f    After changing code or config.yaml: sudo systemctl restart {s}"),
+    "done_logs_file": ("看日志：{log}    改了代码或 config.yaml 之后：{py} install.py --restart",
+                       "Logs: {log}    After changing code or config.yaml: {py} install.py --restart"),
+    "restarted": ("已重启。", "Restarted."),
+    "stopped_pid": ("已停止进程 {pid}。", "Stopped process {pid}."),
+    "not_installed": ("还没装服务。", "No service installed."),
     "done_manual": ("手动运行：{py} {app}", "Run manually: {py} {app}"),
     "yes_no": (" [Y/n] ", " [Y/n] "),
     "no_yes": (" [y/N] ", " [y/N] "),
@@ -128,7 +153,7 @@ def python_ok(py):
 def choose_python():
     title(m("py_title"))
     cands = []
-    for p in (DEFAULT_PYTHON, sys.executable, shutil.which("python3")):
+    for p in (DEFAULT_PYTHON, sys.executable, shutil.which("python3"), shutil.which("python")):
         if p and os.path.exists(p) and os.path.realpath(p) not in [os.path.realpath(c) for c in cands]:
             cands.append(p)
     for i, p in enumerate(cands, 1):
@@ -195,21 +220,17 @@ def ssh_target(alias):
 
 
 def probe(alias):
-    """和 app.py 一样：允许 keyboard-interactive，但一旦要输入就直接杀掉 ssh"""
-    env = dict(os.environ, SSH_ASKPASS=ASKPASS, SSH_ASKPASS_REQUIRE="force")
-    env.setdefault("DISPLAY", "none")
+    """和 app.py 一样（sshutil）：允许 keyboard-interactive，但一旦要输入就直接杀掉 ssh"""
     try:
-        p = subprocess.run(
-            ["ssh", "-o", "BatchMode=no", "-o", "KbdInteractiveAuthentication=yes",
-             "-o", "ConnectTimeout=8", alias,
-             "if command -v sbatch >/dev/null; then echo @@SLURM_OK; "
-             "elif command -v qstat >/dev/null && qstat -help 2>&1 | head -n 1 | grep -qE '^(SGE|GE|OGS|SoGE|UGE)'; "
-             "then echo @@SGE_OK; fi"],
-            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=25, env=env,
-            start_new_session=True)
+        p = sshutil.run(
+            alias,
+            "if command -v sbatch >/dev/null; then echo @@SLURM_OK; "
+            "elif command -v qstat >/dev/null && qstat -help 2>&1 | head -n 1 | grep -qE '^(SGE|GE|OGS|SoGE|UGE)'; "
+            "then echo @@SGE_OK; fi",
+            timeout=25, connect_timeout=8)
     except (OSError, subprocess.TimeoutExpired):
         return "down"
-    if "@@NEED_INPUT" in p.stderr:
+    if sshutil.need_input(p.stderr):
         return "2fa"
     if "@@SLURM_OK" in p.stdout:
         return "slurm"
@@ -370,7 +391,7 @@ def read_values():
     return vals
 
 
-# ---------------- systemd ----------------
+# ---------------- 服务：systemd（Linux）/ launchd（macOS）/ 启动文件夹（Windows） ----------------
 def passphrase_keys(hosts):
     keys = set()
     for h in hosts:
@@ -409,6 +430,14 @@ def run_sudo(cmds):
 def install_service(py, port):
     if port_busy(port) and not yes(m("port_busy", p=port), default=False):
         return False
+    if SYSTEM == "Darwin":
+        return install_launchd(py)
+    if SYSTEM == "Windows":
+        return install_startup(py)
+    return install_systemd(py)
+
+
+def install_systemd(py):
     user = os.environ.get("USER") or os.getlogin()
     unit = f"""[Unit]
 Description=HPC Job Dashboard ({APP_DIR})
@@ -419,7 +448,7 @@ Wants=network-online.target
 Type=simple
 User={user}
 WorkingDirectory={APP_DIR}
-ExecStart={py} {os.path.join(APP_DIR, "app.py")}
+ExecStart={py} {APP}
 Environment=PYTHONUNBUFFERED=1
 Restart=on-failure
 RestartSec=10
@@ -445,7 +474,115 @@ WantedBy=multi-user.target
     return ok
 
 
+def launchd_target():
+    return f"gui/{os.getuid()}/{LAUNCHD_LABEL}"
+
+
+def install_launchd(py):
+    """~/Library/LaunchAgents 里的 LaunchAgent：以你自己的身份在登录会话里跑，
+    拿得到 ssh-agent / 钥匙串里的 key 密码"""
+    os.makedirs(os.path.dirname(PLIST_PATH), exist_ok=True)
+    with open(PLIST_PATH, "wb") as f:
+        plistlib.dump({
+            "Label": LAUNCHD_LABEL,
+            "ProgramArguments": [py, APP],
+            "WorkingDirectory": APP_DIR,
+            "EnvironmentVariables": {"PYTHONUNBUFFERED": "1"},
+            "RunAtLoad": True,
+            "KeepAlive": {"SuccessfulExit": False},  # 出错退出就重启
+            "ThrottleInterval": 10,
+            "StandardOutPath": LOG,
+            "StandardErrorPath": LOG,
+        }, f)
+    subprocess.run(["launchctl", "bootout", launchd_target()], capture_output=True)  # 装过的先卸掉
+    if subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", PLIST_PATH]).returncode != 0:
+        print(m("svc_fail", c="launchctl bootstrap"))
+        return False
+    print(m("svc_done"))
+    return True
+
+
+def windowless_python(py):
+    """python.exe 旁边的 pythonw.exe：后台跑，不开黑窗口（app.py 自己把输出写进 dashboard.log）"""
+    pyw = os.path.join(os.path.dirname(py), "pythonw.exe")
+    return pyw if os.path.exists(pyw) else py
+
+
+def start_windows(py):
+    subprocess.Popen([windowless_python(py), APP], cwd=APP_DIR, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+
+
+def install_startup(py):
+    """启动文件夹里的 .cmd：登录时运行，不需要管理员（计划任务的"登录时"触发器要管理员）"""
+    os.makedirs(os.path.dirname(STARTUP_CMD), exist_ok=True)
+    with open(STARTUP_CMD, "w", encoding="utf-8") as f:
+        f.write(f'@echo off\ncd /d "{APP_DIR}"\nstart "" "{windowless_python(py)}" "{APP}"\n')  # 文本模式写，\n 自动变 \r\n
+    start_windows(py)
+    print(m("svc_done"))
+    return True
+
+
+def windows_pids(port):
+    """在 port 上监听的进程（PowerShell 的 Get-NetTCPConnection，netstat 的状态名会随系统语言变）"""
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-Command",
+         f"Get-NetTCPConnection -State Listen -LocalPort {int(port)} -ErrorAction SilentlyContinue"
+         " | Select-Object -ExpandProperty OwningProcess"],
+        capture_output=True, text=True, errors="replace").stdout
+    return sorted({int(x) for x in out.split() if x.isdigit() and int(x) > 0})
+
+
+def stop_windows(port):
+    for pid in windows_pids(port):
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+        print(m("stopped_pid", pid=pid))
+
+
+def startup_python():
+    """从启动文件夹的 .cmd 里读出当初选的 python"""
+    try:
+        with open(STARTUP_CMD, encoding="utf-8") as f:
+            mm = re.search(r'start "" "([^"]+)"', f.read())
+        return mm.group(1) if mm else None
+    except OSError:
+        return None
+
+
+def restart():
+    if SYSTEM == "Darwin":
+        if not os.path.exists(PLIST_PATH):
+            print(m("not_installed"))
+            return
+        ok = subprocess.run(["launchctl", "kickstart", "-k", launchd_target()]).returncode == 0
+    elif SYSTEM == "Windows":
+        py = startup_python()
+        if not py:
+            print(m("not_installed"))
+            return
+        stop_windows(read_values()["port"])
+        start_windows(py)
+        ok = True
+    else:
+        ok = run_sudo([["systemctl", "restart", SERVICE]])
+    if ok:
+        print(m("restarted"))
+
+
 def uninstall():
+    if SYSTEM == "Darwin":
+        subprocess.run(["launchctl", "bootout", launchd_target()], capture_output=True)
+        if os.path.exists(PLIST_PATH):
+            os.remove(PLIST_PATH)
+        print(m("unin_done", s=LAUNCHD_LABEL))
+        return
+    if SYSTEM == "Windows":
+        stop_windows(read_values()["port"])
+        if os.path.exists(STARTUP_CMD):
+            os.remove(STARTUP_CMD)
+        print(m("unin_done", s=STARTUP_CMD))
+        return
     run_sudo([["systemctl", "disable", "--now", SERVICE]])
     if run_sudo([["rm", "-f", UNIT_PATH], ["systemctl", "daemon-reload"]]):
         print(m("unin_done", s=SERVICE))
@@ -454,15 +591,21 @@ def uninstall():
 def main():
     global LANG
     LANG = "zh" if os.environ.get("LANG", "").lower().startswith("zh") else "en"
-    if os.geteuid() == 0:
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
         print(m("root"))
         sys.exit(1)
     if "--uninstall" in sys.argv:
         uninstall()
         return
+    if "--restart" in sys.argv:
+        restart()
+        return
     v = ask(m("lang_q"), "2" if LANG == "zh" else "1")
     LANG = "zh" if v in ("2", "zh", "中文") else "en"
-    os.chmod(ASKPASS, 0o755)
+    if SYSTEM == "Windows":
+        print(m("win_2fa"))
+    else:
+        os.chmod(ASKPASS, 0o755)
 
     py = choose_python()
 
@@ -472,17 +615,23 @@ def main():
     else:
         values, hosts = make_config()
 
-    title("systemd")
-    if yes(m("svc_q"), default=False):
-        bad = passphrase_keys(hosts)
-        if bad:
-            print(m("keys_warn", k=", ".join(bad)))
-        install_service(py, values["port"])
-    else:
-        print(m("done_manual", py=py, app=os.path.join(APP_DIR, "app.py")))
+    title({"Darwin": "launchd", "Windows": "Startup"}.get(SYSTEM, "systemd"))
+    installed = False
+    if SYSTEM not in ("Linux", "Darwin", "Windows"):
+        print(m("no_svc", s=SYSTEM))
+    elif yes(m({"Darwin": "svc_q_mac", "Windows": "svc_q_win"}.get(SYSTEM, "svc_q")), default=False):
+        if SYSTEM == "Linux":  # 只有 systemd 服务拿不到桌面的 ssh-agent
+            bad = passphrase_keys(hosts)
+            if bad:
+                print(m("keys_warn", k=", ".join(bad)))
+        installed = install_service(py, values["port"])
+    if not installed:
+        print(m("done_manual", py=py, app=APP))
     host = "127.0.0.1" if values["host"] in ("0.0.0.0", "::") else values["host"]
     print(m("done_url", h=host, p=values["port"]))
-    print(m("done_logs", s=SERVICE))
+    if installed:
+        print(m("done_logs", s=SERVICE) if SYSTEM == "Linux"
+              else m("done_logs_file", log=LOG, py="python" if SYSTEM == "Windows" else "python3"))
 
 
 if __name__ == "__main__":

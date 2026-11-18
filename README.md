@@ -37,8 +37,11 @@
 git clone https://github.com/lamdalamda/cluster_monitor.git
 cd cluster_monitor
 python3 install.py   # 回答几个问题，一路回车也行 / answer a few questions (Enter = default)
-python3 app.py       # 或者让 install.py 装成 systemd 服务 / or let install.py set up a systemd service
+python3 app.py       # 或者让 install.py 装成服务 / or let install.py set up a service
 ```
+
+Linux / macOS / Windows 都能跑（Windows 上用 `python` 代替 `python3`）。
+Works on Linux, macOS and Windows (use `python` instead of `python3` on Windows).
 
 然后打开 / then open <http://127.0.0.1:8787>，点"立即刷新" / click "Refresh"。
 想要排队预测：在跑 dashboard 的 Python 里 `pip install scikit-learn`，再到页面上点"训练 / 更新模型"。
@@ -97,7 +100,7 @@ python3 install.py
 3. asks for the listen address, port, auto refresh, history hours, folder size alert and
    whether to collect wait-time data, then writes `config.yaml` from `config.example.yaml`
    (comments kept; an existing config.yaml is backed up first)
-4. optionally installs the systemd service (see below)
+4. optionally installs a service that starts it automatically (see below)
 
 `config.yaml` is your own file and not tracked by git (the repo ships `config.example.yaml`),
 so pulling updates never conflicts with your settings. You can also copy
@@ -150,16 +153,28 @@ shown in the page. Predictions with under 3 batches of history are greyed out ("
 data"). Refreshing more often (`auto_refresh_minutes: 15`) gives the model much better data.
 `python predictor.py` trains and prints the backtest without saving.
 
-### Run as a systemd service (start on boot)
+### Run as a service (start automatically)
 
-`python3 install.py` offers this as its last step (it runs the `sudo` commands and asks for
-your password); `python3 install.py --uninstall` removes it.
+`python3 install.py` offers this as its last step; `python3 install.py --restart` restarts it
+after you change code or config.yaml, and `python3 install.py --uninstall` removes it. Stop any
+manually started `python app.py` first, or the port will clash. What it sets up depends on the OS:
 
-The service is called `hpc-dashboard` and runs as your own user (using your
-`~/.ssh/config` and keys; a system service can't reach your desktop ssh-agent, so the keys
-must not have a passphrase). Logs: `journalctl -u hpc-dashboard -f`. After changing code or
-config.yaml: `sudo systemctl restart hpc-dashboard`. Stop any manually started
-`python app.py` first, or the port will clash.
+| | What | Starts | Restart on crash | Logs |
+|---|---|---|---|---|
+| Linux | systemd service `hpc-dashboard` (needs `sudo`) | at boot | yes | `journalctl -u hpc-dashboard -f` |
+| macOS | launchd agent `~/Library/LaunchAgents/local.hpc-dashboard.plist` (no sudo) | at login | yes | `dashboard.log` |
+| Windows | `hpc-dashboard.cmd` in your Startup folder, runs `pythonw` (no admin) | at login | no | `dashboard.log` |
+
+All three run as your own user with your `~/.ssh/config` and keys. On Linux a system service
+can't reach your desktop ssh-agent, so the keys must not have a passphrase; on macOS the agent
+runs in your login session and can use the agent / keychain. On Linux you can also restart with
+`sudo systemctl restart hpc-dashboard`.
+
+**Windows and 2FA:** Windows' built-in OpenSSH can't run the helper that stops ssh when a cluster
+asks for a code, so on Windows the dashboard only uses key / ssh-agent logins (`BatchMode=yes`).
+Clusters that need keyboard-interactive login (2FA, passwords — even while a 2FA session is
+still valid) show "2FA needed". Run the dashboard inside WSL for those. Also, Windows' OpenSSH
+has no `ControlMaster`, so connection sharing in `~/.ssh/config` doesn't apply there.
 
 ### The page
 
@@ -311,7 +326,10 @@ registering it in `schedulers/__init__.py`.
   automatically; list more per cluster in `hide_partitions` (wildcards ok).
 - **"Won't start" alerts**: pending jobs whose reason matches `never_run_reasons`
   (DependencyNeverSatisfied, PartitionTimeLimit, QOSMax*PerJob*, held, SGE Eqw … see
-  config.example.yaml) get an alert at the top and no start estimate.
+  config.example.yaml) get an alert at the top and no start estimate. For the ones you can
+  release yourself (BadConstraints, often left behind when nodes were briefly down; your own
+  holds; SGE hqw) the alert includes a click-to-copy command such as
+  `scontrol release 1234,1235` (`release_command` in config.yaml to change it).
 - **Waiting on dependencies**: in "mine" counts, jobs waiting on dependencies aren't counted
   as pending; they're shown in brackets, split by the head of their dependency chain: after
   running if it is running (they're next), after pending if it is still queued, e.g.
@@ -423,15 +441,26 @@ Slurm 自己的预计开始时间、原因、优先级）和最终等了多久�
 更准就用它；回测表在页面上能看到。历史数据不到 3 批的预测显示成灰色（"数据少"）。
 刷新越频繁（`auto_refresh_minutes: 15`），数据越好。`python predictor.py` 训练并打印回测（不保存）。
 
-### 装成 systemd 服务（开机自启）
+### 装成服务（自动启动）
 
-`python3 install.py` 最后一步会问要不要装（会执行 `sudo` 命令、提示输密码）；
-`python3 install.py --uninstall` 删除服务。
+`python3 install.py` 最后一步会问要不要装；改了代码或 config.yaml 之后用
+`python3 install.py --restart` 重启，`python3 install.py --uninstall` 删除。装之前先把手动跑的
+`python app.py` 停掉，不然端口会冲突。不同系统装的东西不一样：
 
-服务名 `hpc-dashboard`，以你自己的用户身份运行（用你的 `~/.ssh/config` 和 key；系统服务
-拿不到桌面的 ssh-agent，所以 key 不能设密码）。看日志 `journalctl -u hpc-dashboard -f`，
-改了代码或 config.yaml 之后 `sudo systemctl restart hpc-dashboard`。装之前先把手动跑的
-`python app.py` 停掉，不然端口会冲突。
+| | 装的是什么 | 什么时候启动 | 挂了自动重启 | 日志 |
+|---|---|---|---|---|
+| Linux | systemd 服务 `hpc-dashboard`（要 `sudo`） | 开机 | 是 | `journalctl -u hpc-dashboard -f` |
+| macOS | launchd 的 `~/Library/LaunchAgents/local.hpc-dashboard.plist`（不用 sudo） | 登录后 | 是 | `dashboard.log` |
+| Windows | 启动文件夹里的 `hpc-dashboard.cmd`，用 `pythonw` 后台跑（不用管理员） | 登录后 | 否 | `dashboard.log` |
+
+都以你自己的用户身份运行，用你的 `~/.ssh/config` 和 key。Linux 的系统服务拿不到桌面的
+ssh-agent，所以 key 不能设密码；macOS 的 LaunchAgent 在你的登录会话里跑，能用 ssh-agent /
+钥匙串。Linux 上也可以直接 `sudo systemctl restart hpc-dashboard`。
+
+**Windows 和 2FA：** Windows 自带的 OpenSSH 跑不了"集群一要验证码就掐断 ssh"的那个小脚本，
+所以 Windows 上只用 key / ssh-agent 登录（`BatchMode=yes`）。要 keyboard-interactive 登录的集群
+（2FA、密码，哪怕 2FA 还在有效期）会显示"需要 2FA"，这种请在 WSL 里跑 dashboard。另外 Windows
+的 OpenSSH 没有 `ControlMaster`，`~/.ssh/config` 里的连接复用在那边不起作用。
 
 ### 界面说明
 
@@ -550,7 +579,9 @@ job 列表最后一列 `dir` 是工作目录（分组的显示代表 job 的目�
   里写要隐藏的（支持通配符）。
 - **"不会开始"告警**：排队原因匹配 `never_run_reasons` 的 job（DependencyNeverSatisfied、
   PartitionTimeLimit、QOSMax*PerJob*、被 hold、SGE 的 Eqw……见 config.example.yaml）在页面顶上告警，
-  也不给它预测开始时间。
+  也不给它预测开始时间。自己能放出来的（BadConstraints，常常是节点临时下线留下的；自己 hold 的；
+  SGE 的 hqw）告警里会附一条命令，点一下复制，比如 `scontrol release 1234,1235`
+  （config.yaml 里 `release_command` 可以换）。
 - **等依赖的 job**："我的"数字里不算排队，放在括号里，按依赖链最前面那个 job 分两边：它在跑
   就放运行数后面（跑完就轮到），它还在排队就放排队数后面，比如 `4 (+8) / 417 (+384)`。
 - **想多看几个文件**：在 `inspect_files` 里加模式，比如 `OSZICAR`、`slurm-{id}.out`。

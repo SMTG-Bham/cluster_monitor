@@ -164,6 +164,11 @@ never_run_reasons:
   - "Error (*"                 # SGE：Eqw（出错，qstat -j 看 error reason，qmod -cj 清除）
   - "Hold (*"                  # SGE：hqw 但没有依赖（被 hold 了）
 
+# 上面这些里，BadConstraints / JobHeldUser / JobHoldMaxRequeue（Slurm）和 SGE 的 hqw 自己就能放出来，
+# 告警里会给一条放出命令，点一下复制。默认 Slurm 是 scontrol release，SGE 是 qrls；
+# 想换成自己的脚本就写在这里（也可以写在单个集群下面）。{ids} = 空格分开，{ids_csv} = 逗号分开
+# release_command: "srelease {ids}"
+
 # SSH 单次命令超时（秒）
 ssh_timeout_seconds: 15
 

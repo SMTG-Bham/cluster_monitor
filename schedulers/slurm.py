@@ -67,6 +67,9 @@ QOS_LIMIT_FORMAT = "Name,MaxJobsPU,MaxSubmitPU,MaxWall,MaxTRESPU"
 class Slurm(Scheduler):
     kind = "slurm"
     qos_label = "QoS"
+    # BadConstraints：要的节点 / 特性暂时没有（下线、维护）时 Slurm 会把优先级设成 0，节点回来也不会自己恢复
+    RELEASABLE = ("BadConstraints", "JobHeldUser", "JobHoldMaxRequeue")
+    RELEASE_COMMAND = "scontrol release {ids_csv}"
     HISTORY_SECTION = "SACCT"
     PARTITION_LOAD = True
     FEATURES = frozenset({"history", "cluster_load", "qos_info", "backlog", "est_start",

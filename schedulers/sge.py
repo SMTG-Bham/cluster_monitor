@@ -35,6 +35,8 @@ class SGE(Scheduler):
     qos_label = "Project"
     HISTORY_SECTION = "HIST"
     FEATURES = frozenset({"history", "cluster_load"})
+    RELEASABLE = ("Hold (*",)  # hqw 但没有依赖：qhold 过的
+    RELEASE_COMMAND = "qrls {ids}"
 
     def steps(self, want):
         steps = [
