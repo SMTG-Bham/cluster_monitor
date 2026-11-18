@@ -90,8 +90,10 @@ MSG = {
     "svc_q": ("装成 systemd 服务（开机自启、挂了自动重启）吗？需要 sudo。", "Install as a systemd service (start on boot, restart on failure)? Needs sudo."),
     "svc_q_mac": ("装成 launchd 服务（登录后自启、挂了自动重启）吗？不用 sudo。", "Install as a launchd agent (start at login, restart on failure)? No sudo needed."),
     "svc_q_win": ("登录 Windows 后自动在后台启动吗？（放进启动文件夹，不用管理员）", "Start it in the background when you log in to Windows? (goes in the Startup folder, no admin needed)"),
-    "win_2fa": ("注意：Windows 上只能用 key 登录集群；要 2FA / 密码（keyboard-interactive）的集群会显示\"需要 2FA\"，这种请在 WSL 里跑。",
-                "Note: on Windows only key logins work; clusters that need 2FA / a password (keyboard-interactive) will show \"2FA needed\". Run the dashboard in WSL for those."),
+    "win_2fa": ("注意：askpass 自检没通过（ssh 不是 Windows 自带的 OpenSSH，或者 ssh_askpass_abort.cmd/.py 跑不起来），只能用 key 登录集群；要 2FA / 密码的集群会显示\"需要 2FA\"。",
+                "Note: the askpass self-test failed (ssh isn't Windows' built-in OpenSSH, or ssh_askpass_abort.cmd/.py can't run), so only key logins work; clusters that need 2FA / a password will show \"2FA needed\"."),
+    "win_2fa_ok": ("Windows OpenSSH + askpass 自检通过：2FA 集群在 2FA 有效期内能用，要输验证码时会直接断开，不会发任何东西。",
+                   "Windows OpenSSH + askpass self-test passed: 2FA clusters work while the 2FA is valid; when a code is asked for, ssh is stopped and nothing is sent."),
     "no_svc": ("这个系统（{s}）不支持自动装服务，请手动运行。", "Installing a service isn't supported on {s}; run it manually."),
     "port_busy": ("端口 {p} 现在被占用（可能是手动跑的 python app.py），先停掉它再装服务。继续吗？",
                   "Port {p} is in use (maybe a manually started python app.py); stop it before installing the service. Continue?"),
@@ -150,11 +152,23 @@ def python_ok(py):
         return None
 
 
+def store_stub(p):
+    """WindowsApps 下没装 Python 时的 python.exe 只是"去 Microsoft Store 安装"的占位程序
+    （装了的话同一个位置是能用的真 Python，所以要跑一下看看）"""
+    if "\\windowsapps\\" not in p.lower():
+        return False
+    try:
+        return subprocess.run([p, "-c", "pass"], capture_output=True, timeout=20).returncode != 0
+    except (OSError, subprocess.TimeoutExpired):
+        return True
+
+
 def choose_python():
     title(m("py_title"))
     cands = []
     for p in (DEFAULT_PYTHON, sys.executable, shutil.which("python3"), shutil.which("python")):
-        if p and os.path.exists(p) and os.path.realpath(p) not in [os.path.realpath(c) for c in cands]:
+        if p and os.path.exists(p) and not store_stub(p) \
+                and os.path.realpath(p) not in [os.path.realpath(c) for c in cands]:
             cands.append(p)
     for i, p in enumerate(cands, 1):
         print(f"  [{i}] {p}")
@@ -228,7 +242,9 @@ def probe(alias):
             "elif command -v qstat >/dev/null && qstat -help 2>&1 | head -n 1 | grep -qE '^(SGE|GE|OGS|SoGE|UGE)'; "
             "then echo @@SGE_OK; fi",
             timeout=25, connect_timeout=8)
-    except (OSError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired as e:
+        return "2fa" if sshutil.need_input(sshutil.as_text(e.stderr)) else "down"
+    except OSError:
         return "down"
     if sshutil.need_input(p.stderr):
         return "2fa"
@@ -603,7 +619,7 @@ def main():
     v = ask(m("lang_q"), "2" if LANG == "zh" else "1")
     LANG = "zh" if v in ("2", "zh", "中文") else "en"
     if SYSTEM == "Windows":
-        print(m("win_2fa"))
+        print(m("win_2fa_ok" if sshutil.mode() == "askpass" else "win_2fa"))
     else:
         os.chmod(ASKPASS, 0o755)
 
