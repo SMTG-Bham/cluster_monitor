@@ -79,7 +79,7 @@ Each refresh runs **one SSH session per cluster** (clusters one after another) w
 - your machine must be able to log in to each login node with an SSH key (key + agent,
   or a key without passphrase)
 - clusters with 2FA (sulis) work while the 2FA is still valid. The program **never** types
-  a code for you: as soon as the server actually prompts for input, `ssh_askpass_abort.sh`
+  a code for you: as soon as the server actually prompts for input, `ssh_askpass_abort.sh` (Windows: `.cmd`)
   kills ssh (nothing is sent, so no failed attempts pile up), the page shows "2FA needed"
   and automatic retries pause for 10 minutes. Log in once with `ssh sulis` in a terminal,
   then click "Refresh"
@@ -170,10 +170,14 @@ can't reach your desktop ssh-agent, so the keys must not have a passphrase; on m
 runs in your login session and can use the agent / keychain. On Linux you can also restart with
 `sudo systemctl restart hpc-dashboard`.
 
-**Windows and 2FA:** Windows' built-in OpenSSH can't run the helper that stops ssh when a cluster
-asks for a code, so on Windows the dashboard only uses key / ssh-agent logins (`BatchMode=yes`).
-Clusters that need keyboard-interactive login (2FA, passwords — even while a 2FA session is
-still valid) show "2FA needed". Run the dashboard inside WSL for those. Also, Windows' OpenSSH
+**Windows and 2FA:** with Windows' built-in OpenSSH (`OpenSSH_for_Windows`) the helper is
+`ssh_askpass_abort.cmd` + `ssh_askpass_abort.py`, which find the `ssh.exe` that asked and kill it
+before it can send anything, so 2FA clusters work the same as on Linux while the 2FA is still
+valid. Windows' OpenSSH sends an *empty* answer whenever the askpass helper fails, so the dashboard
+first self-tests the helper and falls back to key / ssh-agent logins only (`BatchMode=yes`; 2FA
+clusters then show "2FA needed") if the ssh on PATH isn't Win32-OpenSSH (e.g. Git for Windows'),
+or the helper can't run; set `CM_SSH_BATCHMODE=1` to force that. If the helper starts but its
+python doesn't, it never answers and just waits for the ssh timeout. Also, Windows' OpenSSH
 has no `ControlMaster`, so connection sharing in `~/.ssh/config` doesn't apply there.
 
 ### The page
@@ -381,7 +385,7 @@ registering it in `schedulers/__init__.py`.
 **这不是通过 API/REST 连集群，就是普通的 `ssh <host> <command>`**，所以：
 - 需要你本机能用 SSH key 登录各集群登录节点（SSH key + agent，或者 key 没设密码）
 - 需要 2FA 的集群（sulis）：2FA 在有效期内就能直接用。程序**不会**替你输验证码——
-  服务器一旦真的弹出输入提示，`ssh_askpass_abort.sh` 会立刻把 ssh 杀掉（什么都不发，
+  服务器一旦真的弹出输入提示，`ssh_askpass_abort.sh`（Windows 上是 `.cmd`） 会立刻把 ssh 杀掉（什么都不发，
   不会累积失败次数），网页上显示"需要 2FA"，并且 10 分钟内不再自动重试。
   这时在终端里 `ssh sulis` 登录一次，再点网页上的"立即刷新"就好
 - 会用到你 `~/.ssh/config` 里已经配置好的 Host 别名、ProxyJump、跳板机等设置
@@ -457,9 +461,12 @@ Slurm 自己的预计开始时间、原因、优先级）和最终等了多久�
 ssh-agent，所以 key 不能设密码；macOS 的 LaunchAgent 在你的登录会话里跑，能用 ssh-agent /
 钥匙串。Linux 上也可以直接 `sudo systemctl restart hpc-dashboard`。
 
-**Windows 和 2FA：** Windows 自带的 OpenSSH 跑不了"集群一要验证码就掐断 ssh"的那个小脚本，
-所以 Windows 上只用 key / ssh-agent 登录（`BatchMode=yes`）。要 keyboard-interactive 登录的集群
-（2FA、密码，哪怕 2FA 还在有效期）会显示"需要 2FA"，这种请在 WSL 里跑 dashboard。另外 Windows
+**Windows 和 2FA：** 用 Windows 自带的 OpenSSH（`OpenSSH_for_Windows`）时，掐断 ssh 的小脚本是
+`ssh_askpass_abort.cmd` + `ssh_askpass_abort.py`：找到弹提示的那个 `ssh.exe`，在它发出任何东西之前
+把它结束，所以 2FA 集群和 Linux 上一样，2FA 有效期内能直接用。Windows 的 OpenSSH 在 askpass 失败时
+会发**空回答**，所以 dashboard 先自检一次：PATH 上的 ssh 不是 Win32-OpenSSH（比如 Git for Windows 的）
+或者小脚本跑不起来，就退回只用 key / ssh-agent 登录（`BatchMode=yes`，2FA 集群显示"需要 2FA"）；
+设 `CM_SSH_BATCHMODE=1` 可以强制这样。小脚本起来了但 python 没起来时，它什么都不回答，等 ssh 超时。另外 Windows
 的 OpenSSH 没有 `ControlMaster`，`~/.ssh/config` 里的连接复用在那边不起作用。
 
 ### 界面说明

@@ -91,7 +91,10 @@ def run_ssh(ssh_host, remote_cmd, timeout):
     服务器要输入东西（2FA / 密码）时抛 NeedInput，怎么做到不卡住、不乱回答见 sshutil.py。"""
     try:
         proc = sshutil.run(ssh_host, remote_cmd, timeout)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
+        prompt = sshutil.need_input(sshutil.as_text(e.stderr))  # askpass 兜底等到超时的情况
+        if prompt:
+            raise NeedInput(prompt) from None
         return False, "", "ssh timeout"
     except Exception as e:  # noqa: BLE001
         return False, "", str(e)
