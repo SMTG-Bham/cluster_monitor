@@ -24,6 +24,7 @@ Backend（app.py）只管 SSH、缓存、合并结果、给前端的数据；每
 
 import fnmatch
 import re
+import shlex
 from abc import ABC, abstractmethod
 
 ACTIVE = {"RUNNING", "COMPLETING", "CONFIGURING"}
@@ -116,7 +117,10 @@ class Scheduler(ABC):
         tpl = self.cluster.get("release_command") or self.config.get("release_command") or self.RELEASE_COMMAND
         if not tpl or not ids or not any(fnmatch.fnmatchcase(reason, p) for p in self.RELEASABLE):
             return None
-        return tpl.format(ids=" ".join(ids), ids_csv=",".join(ids))
+        # array 的排队记录 123_[5-100] 带方括号，要加引号免得被 shell 当成通配符
+        q = [shlex.quote(i) if "[" in i else i for i in ids]
+        return tpl.format(ids=" ".join(q), ids_csv=shlex.quote(",".join(ids)) if any("[" in i for i in ids)
+                          else ",".join(ids))
 
     def analyze_backlog(self, sections):
         """返回 (给前端的 result, 给 estimate_job 用的 model)"""
@@ -176,15 +180,20 @@ def dependency_sides(jobs):
         todo = [d for d in deps if d.get("status") == "unfulfilled"] or deps
         res = "run" if todo else "queue"
         for d in todo:
-            t = jobs.get(d["id"])
-            if t is None or d["id"] in seen:
-                r = "queue"
-            elif t["state"] in ACTIVE:
-                r = "run"
-            elif t["state"] in PENDING and waiting_on_dependency(t):
-                r = side(d["id"], seen | {jid})
-            else:  # 前置在排队；或者已经结束了却还没满足（afterok 遇到失败，永远等不到）
-                r = "queue"
+            targets = [] if d["id"] in seen else dep_targets(jobs, d["id"])
+            # 指向 array：已经结束的 task 不用管，看还没结束的；全都结束了却还没满足 = 永远等不到
+            live = [t for t in targets if jobs[t]["state"] in ACTIVE | PENDING] if len(targets) > 1 else targets
+            r = "run" if live else "queue"
+            for tid in live:
+                t = jobs[tid]
+                if t["state"] in ACTIVE:
+                    continue
+                if t["state"] in PENDING and waiting_on_dependency(t) and tid not in seen:
+                    r = side(tid, seen | {jid})
+                else:  # 前置在排队；或者已经结束了却还没满足（afterok 遇到失败，永远等不到）
+                    r = "queue"
+                if r == "queue":
+                    break
             if r == "queue":
                 res = "queue"
                 break
@@ -200,3 +209,47 @@ def dependency_sides(jobs):
 def sort_jobid(jid):
     m = re.match(r"(\d+)", jid)
     return int(m.group(1)) if m else 0
+
+
+# ---------------- job array ----------------
+# Slurm：排队中的 task 合成一条 '123_[5-100%10]' / '123_[1,3,7-9]'，开始后各自是 '123_5'
+# SGE：排队中的 '123_[5-100:1]'（qstat 的 tasks 字段），在跑的 '123_5'
+ARRAY_RANGE = re.compile(r"^(\d+)_\[(.+)\]$")
+
+
+def base_jid(jid):
+    """'123_4' / '123_[5-10]' -> '123'（array job 的各个 task 算同一个 job）"""
+    m = re.match(r"(\d+)", jid or "")
+    return m.group(1) if m else (jid or "")
+
+
+def array_tasks(jid):
+    """一条记录代表几个 task：'123_[1-100%10]' -> 100，'123_[1,3,5-7]' -> 5，
+    '123_[1-99:2]' -> 50；普通 job / 单个 task -> 1。认不出来的也算 1"""
+    m = ARRAY_RANGE.match(jid or "")
+    if not m:
+        return 1
+    n = 0
+    for part in m.group(2).split("%")[0].split(","):
+        rng, _, step = part.partition(":")
+        a, _, b = rng.partition("-")
+        try:
+            a, b, step = int(a), int(b or a), int(step or 1)
+        except ValueError:
+            return max(n, 1)
+        if b >= a and step > 0:
+            n += (b - a) // step + 1
+    return max(n, 1)
+
+
+def ntasks(j):
+    return j.get("n_tasks") or array_tasks(j.get("id", ""))
+
+
+def dep_targets(jobs, dep_id):
+    """依赖指向的 job：有这个 id 就是它；指向整个 array（'123'）或者还没展开的 task 时，
+    返回这个 array 现在能看到的所有记录（各个 task + 排队中的合并记录）"""
+    if dep_id in jobs:
+        return [dep_id]
+    base = base_jid(dep_id)
+    return [jid for jid in jobs if jid != dep_id and base_jid(jid) == base and "_" in jid]

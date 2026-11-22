@@ -765,8 +765,11 @@ class Predictor:
             return
         now = now or datetime.now()
         ctx = context_of(result, self.runs, now)
+        # 排队中的 array 合并记录（123_[5-100]）也预测：预测的是"下一个 task 什么时候开始"（和同样大小的
+        # 单个 job 一样排）。被 array 自己的 %N 限制卡住的（JobArrayTaskLimit）要等自己前面的 task 跑完，不预测
         todo = [(jid, job_samples(j, ctx, now)) for jid, j in jobs.items()
-                if j["state"] in PENDING and j.get("live") and "[" not in jid and not j.get("never_run")]
+                if j["state"] in PENDING and j.get("live") and not j.get("never_run")
+                and not ("[" in jid and "JobArrayTaskLimit" in (j.get("reason") or ""))]
         if not todo:
             return
         model = self.bundle["model"]
