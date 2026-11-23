@@ -54,7 +54,8 @@ class SGE(Scheduler):
                                   f"awk -F: -v u=\"$(id -un)\" -v t=$(( $(date +%s) - {hours * 3600} )) "
                                   "'$4==u && ($11>=t || ($11==0 && $9>=t))'"))
         if want.get("load"):
-            steps.append(("LOAD", "qstat -u '*' -ext | awk 'NR>2 && $1 ~ /^[0-9]+$/ {print $6\"|\"$8}' "
+            # -g d：array 的每个 task 一行（不加的话排队中的 123 5-100:1 只算 1 个）
+            steps.append(("LOAD", "qstat -u '*' -ext -g d | awk 'NR>2 && $1 ~ /^[0-9]+$/ {print $6\"|\"$8}' "
                                   "| sort | uniq -c"))
         return steps
 

@@ -45,7 +45,8 @@ import sshutil
 import waitlog
 import textview
 from i18n import L, as_l, prefixed, suffixed
-from schedulers.base import ACTIVE, PENDING, dependency_sides, sort_jobid, waiting_on_dependency
+from schedulers.base import (ACTIVE, PENDING, array_tasks, base_jid, dependency_sides, ntasks, sort_jobid,
+                             waiting_on_dependency)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if sys.stdout is None:  # Windows 计划任务用 pythonw 跑，没有控制台：输出写进 dashboard.log
@@ -149,11 +150,6 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def base_jid(jid):
-    """'123_4' -> '123'（array job 的各个 task 算同一个 job）"""
-    return jid.split("_")[0]
-
-
 def dir_key(cluster, workdir):
     return f"{cluster}\u0000{workdir}"
 
@@ -169,8 +165,11 @@ def finished_between(prev, r):
     # 上次没拿到历史记录的话，"上次没有"不代表是新提交的，只看上次还在跑/排队的
     ids = [jid for jid, j in new.items() if j["state"] not in live
            and (old[jid]["state"] in live if jid in old else prev.get("history_ok", True))]
+    # 排队中的 array 合并记录（123_[5-100]）每开始一个 task 范围就变一次，只要这个 array 还在就不算不见了
+    new_arrays = {base_jid(jid) for jid in new if "_" in jid}
     gone = [{**j, "state": "UNKNOWN", "gone": True} for jid, j in old.items()
-            if j["state"] in live and jid not in new]
+            if j["state"] in live and jid not in new
+            and not ("[" in jid and base_jid(jid) in new_arrays)]
     return {"since": prev["at"], "until": r["at"], "ids": sorted(ids, key=sort_jobid),
             "gone": sorted(gone, key=lambda j: sort_jobid(j["id"]))}
 
@@ -368,6 +367,7 @@ class Backend:
         pats = self.config.get("never_run_reasons", DEFAULT_NEVER_RUN) or []
         sides = dependency_sides(r.get("jobs", {}))
         for jid, j in r.get("jobs", {}).items():
+            j["n_tasks"] = array_tasks(jid)  # 排队中的 array 合并记录代表几个 task，其它都是 1
             reason = (j.get("reason") or "").strip("()") if j["state"] in PENDING else ""
             j["never_run"] = reason if reason and any(fnmatch.fnmatchcase(reason, p) for p in pats) else ""
             # 在排队，但还在等前置 job：前端单独显示成"等依赖"，不算真正在排队
@@ -838,7 +838,7 @@ class Backend:
         part_info = sched.parse_partitions(sections) if sched.has("partition_info") else None
         # 有的集群（比如 PrivateData=jobs）只能看到自己的 job，
         # 这时"全集群"数字其实就是你自己的，没有参考价值，标记一下前端显示为隐藏
-        mine_active = sum(1 for j in jobs.values() if j["state"] in ACTIVE | PENDING)
+        mine_active = sum(ntasks(j) for j in jobs.values() if j["state"] in ACTIVE | PENDING)
         load_total = sum(v["running"] + v["pending"] for v in load.values())
         load_private = with_load and load_total == mine_active
         if load_private:
@@ -906,9 +906,10 @@ class Backend:
                     # pending 里包括等依赖的（dep）；其中 dep_run = 依赖链的根在跑的。
                     # 前端：运行 (+dep_run) / 排队 (+其余等依赖的)
                     m = mine.setdefault((q, p), {"running": 0, "pending": 0, "dep": 0, "dep_run": 0})
-                    m["running" if j["state"] in ACTIVE else "pending"] += 1
-                    m["dep"] += jid in sides
-                    m["dep_run"] += sides.get(jid) == "run"
+                    n = ntasks(j)  # array：按 task 数（QoS 的 MaxJobsPU 也是按 task 算的）
+                    m["running" if j["state"] in ACTIVE else "pending"] += n
+                    m["dep"] += n * (jid in sides)
+                    m["dep_run"] += n * (sides.get(jid) == "run")
 
         parts = {r["name"]: dict(r) for r in part_info or []}
         for _, p in sorted(seen):  # 只在 job 里见过的分区（比如 SGE 的并行环境）
@@ -999,11 +1000,12 @@ class Backend:
                 "name": q,
                 "note": r["note"],
                 "configured": q in configured_names,
-                "mine_running": sum(1 for j in mine if j["state"] in ACTIVE),
-                "mine_pending": sum(1 for j in mine if j["state"] in PENDING),
+                # array 按 task 数算（排队中的 123_[1-100] 是 100 个）
+                "mine_running": sum(ntasks(j) for j in mine if j["state"] in ACTIVE),
+                "mine_pending": sum(ntasks(j) for j in mine if j["state"] in PENDING),
                 # 其中在等依赖的（不算真正在排队；mine_pending 仍然包括它们，waitlog / 模型用的是这个）
-                "mine_dep": sum(1 for j in mine if j["id"] in sides),
-                "mine_dep_run": sum(1 for j in mine if sides.get(j["id"]) == "run"),
+                "mine_dep": sum(ntasks(j) for j in mine if j["id"] in sides),
+                "mine_dep_run": sum(ntasks(j) for j in mine if sides.get(j["id"]) == "run"),
                 "all_running": load.get(q, {}).get("running", 0) if with_load else None,
                 "all_pending": load.get(q, {}).get("pending", 0) if with_load else None,
                 "max_jobs_pu": lim.get("max_jobs_pu", ""),
@@ -1051,7 +1053,8 @@ def check_client_ip():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    lang = str(config.get("language") or "").lower()
+    return render_template("index.html", default_lang=lang if lang in ("zh", "en") else "")
 
 
 @app.route("/api/jobs")

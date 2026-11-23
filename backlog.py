@@ -15,6 +15,7 @@
 import re
 
 from i18n import L
+from schedulers.base import array_tasks
 
 DEFAULT_TIMELIMIT_HOURS = 24.0
 
@@ -120,7 +121,7 @@ def analyze(sections, me):
         except ValueError:
             cpus = 0
         jobs.append({
-            "id": p[0], "id_num": base_id(p[0]), "parts": p[1].split(","), "state": p[2],
+            "id": p[0], "id_num": base_id(p[0]), "tasks": array_tasks(p[0]), "parts": p[1].split(","), "state": p[2],
             "running": running, "cpus": cpus, "gpu_type": gtype, "gpus": gcount,
             "limit": p[5], "limit_h": limit_h,
             "left_h": parse_duration(p[6]) if running else limit_h,
@@ -144,7 +145,8 @@ def analyze(sections, me):
     mine = {}
     for j in jobs:
         # 排队时可以列多个分区（bluebear 那种），工作量平均摊到每个分区上
-        share = 1.0 / len(j["parts"])
+        # 排队中的 array 合并记录（123_[1-100]）是 100 个 task 的工作量
+        share = j["tasks"] / len(j["parts"])
         for p in j["parts"]:
             cpu_local[p] = cpu_local.get(p, 0.0) + j["left_h"] * j["cpus"] * share
             if j["gpus"]:
@@ -155,7 +157,7 @@ def analyze(sections, me):
                     gpu_global[t] = gpu_global.get(t, 0.0) + w
             if j["user"] == me:
                 m = mine.setdefault(p, {"running": 0, "pending": 0})
-                m["running" if j["running"] else "pending"] += 1
+                m["running" if j["running"] else "pending"] += j["tasks"]
                 if not j["running"]:
                     my_first_pending[p] = min(my_first_pending.get(p, j["id_num"]), j["id_num"])
 

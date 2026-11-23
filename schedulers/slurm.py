@@ -81,8 +81,9 @@ class Slurm(Scheduler):
             steps.append(("SACCT", f"sacct -X --starttime=now-{want['history_hours']}hours "
                                    f"-o {SACCT_FORMAT} --parsable2 --noheader"))
         if want.get("load"):
-            # 全集群（所有用户）每个 QoS × 分区的 running/pending 数，用来判断哪里比较空
-            steps.append(("LOAD", "squeue -h -t RUNNING,PENDING -o '%q|%P|%T' | sort | uniq -c"))
+            # 全集群（所有用户）每个 QoS × 分区的 running/pending 数，用来判断哪里比较空。
+            # -r：排队中的 array 每个 task 一行（不加的话 123_[1-1000] 只算 1 个）
+            steps.append(("LOAD", "squeue -r -h -t RUNNING,PENDING -o '%q|%P|%T' | sort | uniq -c"))
         if want.get("partition_info"):
             # 分区|可用|时限|节点 已用/空闲/其他/总数|CPU 已用/空闲/其他/总数
             steps.append(("PART", "sinfo -h -o '%P|%a|%l|%F|%C'"))
@@ -114,6 +115,10 @@ class Slurm(Scheduler):
         hist = parse_sacct(sections.get("SACCT", []), name)
         active = parse_squeue(sections.get("SQUEUE", []), name)
         jobs = {}
+        if active or "SQUEUE" in sections:
+            # sacct 里排队中的 array 合并记录（123_[5-100]）范围可能和 squeue 的写法 / 时刻对不上，
+            # 现在在队列里的以 squeue 为准
+            hist = {k: v for k, v in hist.items() if "[" not in k or k in active}
         for jid in list(hist) + [j for j in active if j not in hist]:
             rec = dict(hist.get(jid, {}))
             # squeue(活跃)覆盖 sacct(历史)，但不拿空值覆盖（比如 sacct 才有的 end）
@@ -190,7 +195,9 @@ def parse_dependency(dep_raw):
             continue
         dep_type, ids_str, status = m.group(1), m.group(2) or "", m.group(3) or ""
         ids_str = re.sub(r"\+\d+", "", ids_str)  # after:123+60 里的 +60 是分钟数
-        for dep_id in dict.fromkeys(re.findall(r"(\d+)(?:_[\d*]+)?", ids_str)):
+        # 123_* / 123 = 整个 array，123_5 = 其中一个 task
+        for dep_id in dict.fromkeys(m2.group(1) + (m2.group(2) or "") for m2 in
+                                    re.finditer(r"(\d+)(?:(_\d+)|_\*)?", ids_str)):
             deps.append({"type": dep_type, "id": dep_id, "status": status})
         if not ids_str:  # singleton 之类不带 id 的
             deps.append({"type": dep_type, "id": "", "status": status})

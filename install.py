@@ -372,6 +372,7 @@ def make_config():
         "history_hours": ask_int(m("hist_q"), 48),
         "dir_size_warn_gb": ask_int(m("size_q"), 30),
         "waitlog": yes(m("waitlog_q")),
+        "language": LANG,  # 网页默认语言跟安装时选的一样
     }
     title(m("preview"))
     for name, host, sched in clusters:
@@ -391,6 +392,21 @@ def make_config():
         f.write(text)
     print(m("written", p=CONFIG))
     return values, [h for _, h, _ in clusters]
+
+
+def set_config_value(key, val):
+    """改 config.yaml 里一个顶层值（没有就加在最后），其它内容和注释不动"""
+    try:
+        with open(CONFIG, encoding="utf-8") as f:
+            text = f.read()
+        new, n = re.subn(rf"^{key}:[^\n#]*", f"{key}: {yaml_scalar(val)}", text, count=1, flags=re.M)
+        if not n:
+            new = text + ("" if text.endswith("\n") else "\n") + f"{key}: {yaml_scalar(val)}\n"
+        if new != text:
+            with open(CONFIG, "w", encoding="utf-8") as f:
+                f.write(new)
+    except OSError:
+        pass
 
 
 def read_values():
@@ -628,6 +644,7 @@ def main():
     hosts = existing_cluster_hosts()
     if os.path.exists(CONFIG) and ask(m("cfg_exists"), "k").lower().startswith("k"):
         values = read_values()
+        set_config_value("language", LANG)  # 保留旧 config 也按这次选的语言改网页默认语言
     else:
         values, hosts = make_config()
 

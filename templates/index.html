@@ -253,24 +253,6 @@
   <details class="how"><summary data-i18n="bl_how"></summary><div data-i18n-html="bl_how_body"></div></details>
   <div id="ovGrid"></div>
 
-  <h2 id="mlH"><span data-i18n="ml_title"></span> <button id="mlToggle"></button><button class="viewBtn" data-view="ml"></button>
-    <button id="mlTrain"></button> <span class="muted" data-i18n="ml_hint"></span></h2>
-  <div id="mlWrap">
-    <details class="how"><summary data-i18n="ml_how"></summary><div data-i18n-html="ml_how_body"></div></details>
-    <div id="mlStatus" class="card"></div>
-    <form class="hist-ctl" id="mlForm">
-      <select id="mlCluster"></select>
-      <label>CPU <input type="number" id="mlCpus" min="1" step="1"></label>
-      <label>GPU <input type="number" id="mlGpus" min="0" step="1"></label>
-      <label><span data-i18n="ml_nodes"></span> <input type="number" id="mlNodes" min="1" step="1"></label>
-      <label><span data-i18n="ml_time"></span> <input type="number" id="mlTime" min="0" step="0.5"></label>
-      <button type="submit" class="primary" data-i18n="ml_go"></button>
-      <span class="muted" data-i18n="ml_form_hint"></span>
-    </form>
-    <div id="mlBest"></div>
-    <div id="mlResult" class="tablewrap"></div>
-  </div>
-
   <div id="doneSec">
     <h2><span data-i18n="done_title"></span> <button id="doneToggle"></button>
       <span id="doneCounts"></span></h2>
@@ -312,6 +294,24 @@
     <div id="histStats" class="card"></div>
     <div id="histJobs" class="tablewrap"></div>
   </div>
+
+  <h2 id="mlH"><span data-i18n="ml_title"></span> <button id="mlToggle"></button><button class="viewBtn" data-view="ml"></button>
+    <button id="mlTrain"></button> <span class="muted" data-i18n="ml_hint"></span></h2>
+  <div id="mlWrap">
+    <details class="how"><summary data-i18n="ml_how"></summary><div data-i18n-html="ml_how_body"></div></details>
+    <div id="mlStatus" class="card"></div>
+    <form class="hist-ctl" id="mlForm">
+      <select id="mlCluster"></select>
+      <label>CPU <input type="number" id="mlCpus" min="1" step="1"></label>
+      <label>GPU <input type="number" id="mlGpus" min="0" step="1"></label>
+      <label><span data-i18n="ml_nodes"></span> <input type="number" id="mlNodes" min="1" step="1"></label>
+      <label><span data-i18n="ml_time"></span> <input type="number" id="mlTime" min="0" step="0.5"></label>
+      <button type="submit" class="primary" data-i18n="ml_go"></button>
+      <span class="muted" data-i18n="ml_form_hint"></span>
+    </form>
+    <div id="mlBest"></div>
+    <div id="mlResult" class="tablewrap"></div>
+  </div>
 </main>
 <div id="toast"></div>
 <div id="vizTip"></div>
@@ -348,6 +348,8 @@ const I18N = {
     click_copy: "点击复制", click_copy_path: "点击复制路径",
     n_running_more: n => `+${n} 个在跑`, n_jobs: n => `${n} 个 job`, current: "↳ 当前",
     no_match: "没有符合条件的 job", summary: (g, n) => `${g} 组 · ${n} 个 job`,
+    array_tasks: n => `${n} 个 task`, array_tasks_tip: n => `job array 里还在排队的 ${n} 个 task（开始后各自单独一行）`,
+    array_dep: s => `整个 job array：${s}`,
     ionic: "离子步", converged: "已收敛",
     reading: "读取中…", reread: "重新读取", read: "读取", queued_read: "排队读取工作目录…", not_read: "还没读取工作目录",
     du_fail: "du 超时或失败", size_unknown: "大小 ?", same_dir: "同目录：", and_n: n => ` 等 ${n} 个`,
@@ -474,6 +476,8 @@ const I18N = {
     g_none: "没有符合筛选的在跑 / 排队的 job", g_click: "点一行跳到表格里",
     g_tip_run: (id, s, l) => `#${id} 在跑：${s} 开始，时限 ${l}`,
     g_tip_pd: (id, a, m, b) => `#${id} 预计开始 ${m}（多半在 ${a} – ${b}）`,
+    g_tip_pd_none: (id, n, r) => `#${id} 排队中${n > 1 ? `（${n} 个 task）` : ""}，原因 ${r}\n` + (r.includes("JobArrayTaskLimit") ? "被 array 自己的 %N 同时运行上限卡住，前面的 task 跑完一个才开始下一个" : "还没有模型预测（训练模型后会显示预计开始时间）"),
+    g_pend_n: n => `一共 ${n} 个 task 在排队`, g_more_tasks: n => `还有 ${n} 个在跑的没画（点开看全部）`,
     g_beyond: d => `→ ${d}`,
     cal_head: "网页当时给的预测（第一次看到它排队时）vs 实际等了多久；每个点一个 job，灰带 = 误差在 2 倍以内",
     cal_title: (c, n, nb, h, hb) => `${c}：${n} 个 job（${nb} 批），${h} 在 2 倍以内（按批 ${hb}）`, cal_x: "预测", cal_y: "实际",
@@ -526,6 +530,8 @@ const I18N = {
     click_copy: "Click to copy", click_copy_path: "Click to copy path",
     n_running_more: n => `+${n} more running`, n_jobs: n => `${n} jobs`, current: "↳ current",
     no_match: "No matching jobs", summary: (g, n) => `${g} groups · ${n} jobs`,
+    array_tasks: n => `${n} tasks`, array_tasks_tip: n => `${n} pending tasks of a job array (each gets its own row once it starts)`,
+    array_dep: s => `whole job array: ${s}`,
     ionic: "ionic step", converged: "converged",
     reading: "Reading…", reread: "Re-read", read: "Read", queued_read: "Queued to read working folder…", not_read: "Working folder not read yet",
     du_fail: "du timed out or failed", size_unknown: "size ?", same_dir: "Same folder: ", and_n: n => ` (${n} total)`,
@@ -652,6 +658,8 @@ const I18N = {
     g_none: "No running / queued jobs match the filters", g_click: "Click a row to jump to it in the table",
     g_tip_run: (id, s, l) => `#${id} running: started ${s}, limit ${l}`,
     g_tip_pd: (id, a, m, b) => `#${id} predicted start ${m} (likely ${a} – ${b})`,
+    g_tip_pd_none: (id, n, r) => `#${id} pending${n > 1 ? ` (${n} tasks)` : ""}, reason ${r}\n` + (r.includes("JobArrayTaskLimit") ? "Held by the array's own %N concurrency limit: the next task starts when a running one finishes" : "No model prediction yet (train the model to see a predicted start)"),
+    g_pend_n: n => `${n} tasks pending in total`, g_more_tasks: n => `${n} more running not drawn (expand to see all)`,
     g_beyond: d => `→ ${d}`,
     cal_head: "What the page predicted (when the job was first seen queueing) vs how long it actually waited; one dot per job, grey band = within 2×",
     cal_title: (c, n, nb, h, hb) => `${c}: ${n} jobs (${nb} batches), ${h} within 2× (${hb} by batch)`, cal_x: "predicted", cal_y: "actual",
@@ -679,7 +687,9 @@ const I18N = {
 };
 function loadPref(k, d){ try{ const v = localStorage.getItem("hpcdash." + k); return v === null ? d : JSON.parse(v); }catch(e){ return d; } }
 function savePref(k, v){ try{ localStorage.setItem("hpcdash." + k, JSON.stringify(v)); }catch(e){} }
-let lang = loadPref("lang", (navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
+// 默认语言：config.yaml 的 language（install.py 按安装时选的语言写），没写就按浏览器；点过切换按钮的以浏览器里记的为准
+const DEFAULT_LANG = {{ default_lang|tojson }} || ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
+let lang = loadPref("lang", DEFAULT_LANG);
 function t(k, ...a){ const v = I18N[lang][k] ?? I18N.zh[k] ?? k; return typeof v === "function" ? v(...a) : v; }
 const tr = m => m === null || m === undefined ? "" : typeof m === "object" ? (m[lang] ?? m.zh ?? "") : String(m);
 
@@ -713,6 +723,17 @@ const hasF = (c, f) => !c.features || c.features.includes(f);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const jobKey = j => j.cluster + ":" + j.id;
 const idNum = j => parseInt(j.id, 10) || 0;
+// job array：排队中的 task 合成一条 123_[5-100]，n_tasks = 它代表几个 task（后端算好，其它都是 1）
+const nT = j => j.n_tasks || 1;
+const baseId = id => String(id).split("_")[0];
+const taskTag = j => nT(j) > 1 ? ` <span class="count" title="${esc(t("array_tasks_tip", nT(j)))}">${esc(t("array_tasks", nT(j)))}</span>` : "";
+// 依赖指向的 job：有这个 id 就是它，否则（整个 array 123 / 还没展开的 task）是这个 array 现在能看到的所有记录
+function depTargets(cluster, id){
+  const j = jobsByKey[cluster + ":" + id];
+  if (j) return [j];
+  const b = baseId(id);
+  return lastData.jobs.filter(x => x.cluster === cluster && x.id !== id && x.id.includes("_") && baseId(x.id) === b);
+}
 const fmtTime = s => s ? s.slice(5, 16).replace("T", " ") : "-";
 const fmtH = h => h < 0.1 ? "0h" : h > 48 ? (h / 24).toFixed(1) + "d" : h.toFixed(1) + "h";
 const hCls = h => h < 6 ? "h-ok" : h < 24 ? "h-mid" : "h-bad";
@@ -751,13 +772,15 @@ function buildGroups(jobs){
   }
   const groups = [...map.values()];
   for (const g of groups){
-    g.jobs.sort((a, b) => idNum(a) - idNum(b) || a.id.localeCompare(b.id));
+    // 同一个 array：task 按编号（_2 在 _10 前面），排队中的合并记录 123_[5-100] 放最后
+    g.jobs.sort((a, b) => idNum(a) - idNum(b) || nT(a) - nT(b) || a.id.localeCompare(b.id, undefined, {numeric: true}));
     // 代表这一组的 job：正在跑的 > 下一个排队的 > 最后一个
     g.rep = g.jobs.find(j => ACTIVE.has(j.state)) || g.jobs.find(queueing) || g.jobs.find(j => PEND.has(j.state)) || g.jobs[g.jobs.length - 1];
     g.rank = ACTIVE.has(g.rep.state) ? 0 : PEND.has(g.rep.state) ? 1 : 2;
     g.maxId = Math.max(...g.jobs.map(idNum));
     g.counts = {};
-    for (const j of g.jobs) g.counts[dispState(j)] = (g.counts[dispState(j)] || 0) + 1;
+    for (const j of g.jobs) g.counts[dispState(j)] = (g.counts[dispState(j)] || 0) + nT(j);
+    g.nTasks = g.jobs.reduce((a, j) => a + nT(j), 0);
     g.qosList = [...new Set(g.jobs.map(j => j.qos).filter(Boolean))];
     g.nRunning = g.jobs.filter(j => ACTIVE.has(j.state)).length;
   }
@@ -952,38 +975,68 @@ function renderGantt(groups){
     const run = g.jobs.filter(j => ACTIVE.has(j.state)), pend = g.jobs.filter(j => PEND.has(j.state));
     if (!run.length && !pend.length) continue;
     const est = pend.find(j => j.ml_est && j.ml_est.start && !j.dep_wait) || pend.find(j => j.ml_est && j.ml_est.start) || null;
-    const key = run.length ? Math.min(...run.map(j => tms(j.start) || now)) - 1e13 : est ? tms(est.ml_est.start[1]) : 1e15;
+    // 没有模型预测的排队组：有 Slurm 自己估计的开始时间就按它排，否则放最后
+    const slurmEst = Math.min(...pend.map(j => tms(j.start)).filter(v => v > 0), Infinity);
+    const key = run.length ? Math.min(...run.map(j => tms(j.start) || now)) - 1e13 : est ? tms(est.ml_est.start[1])
+      : isFinite(slurmEst) ? slurmEst : 1e15;
     rows.push({g, run, pend, est, key});
   }
   rows.sort((a, b) => a.key - b.key);
   if (!rows.length){ wrap.innerHTML = `<div class="empty">${t("g_none")}</div>`; return; }
   const MAX = 80, shown = rows.slice(0, MAX);
-  const W = vizWidth(wrap), LW = Math.min(300, W * 0.32), RH = 20, H = shown.length * RH;
+  // 每个在跑的 job（array 的每个 task）一条细道，排队的（不管有没有预测）在最下面一道，
+  // 不然同时开始的 task 会叠成一条，排队的没有预测就看不到
+  const LANES = 12;
+  const W = vizWidth(wrap), LW = Math.min(320, W * 0.34);
+  const lay = shown.map(r => {
+    const nRun = Math.min(r.run.length, LANES), lanes = nRun + (r.pend.length ? 1 : 0);
+    return {nRun, lanes, h: lanes <= 1 ? 20 : 4 + lanes * 7};
+  });
+  const H = lay.reduce((a, l) => a + l.h, 0);
   const x = lin(t0, t1, LW, W - 8), cx = v => Math.max(LW, Math.min(W - 8, x(v)));
-  let b = timeTicks(t0, t1, x, H + 2, -6);
+  let b = timeTicks(t0, t1, x, H + 2, -6), y = 0;
   shown.forEach((r, i) => {
-    const y = i * RH, g = r.g, rep = r.est || r.run[0] || g.rep;
+    const {nRun, lanes, h} = lay[i], g = r.g, rep = r.est || r.run[0] || g.rep;
+    // 一道：单个 bar 和以前一样（y+4 高 12）；多道：每道高 5，间隔 7
+    const lane = k => lanes <= 1 ? [y + 4, 12] : [y + 3 + k * 7, 5];
     const cnt = Object.entries(g.counts).map(([s, n]) => `${SHORT[s] || s}${n}`).join(" ");
-    const label = `${g.cluster} · ${g.name}`;
-    b += `<g class="row" data-jump="${esc(jobKey(rep))}"><rect class="hl" x="0" y="${y}" width="${W}" height="${RH}" fill="transparent"/>`
-      + `<text class="lab" x="4" y="${y + 14}"${tip(`${label}  ×${g.jobs.length}\n${cnt}\n${t("g_click")}`)}>${esc(label.length > LW / 6.6 ? label.slice(0, Math.floor(LW / 6.6) - 1) + "…" : label)}</text>`;
-    for (const j of r.run.slice(0, 40)){
-      const s = tms(j.start), lim = durH(j.time_limit) || 24, e = s + lim * 3.6e6;
-      const tp = tip(t("g_tip_run", j.id, fmtTime(j.start), j.time_limit || "-"));
-      if (e > t0) b += `<rect x="${cx(s)}" y="${y + 4}" width="${Math.max(cx(now) - cx(s), 1)}" height="12" rx="2" fill="var(--ok)"${tp}/>`
-        + `<rect x="${cx(now)}" y="${y + 4}" width="${Math.max(cx(e) - cx(now), 0)}" height="12" rx="2" fill="var(--ok)" opacity="0.22"${tp}/>`;
-    }
-    if (r.est){
-      const [a, m, z] = r.est.ml_est.start.map(tms), lim = durH(r.est.time_limit) || 24, dep = !!r.est.dep_wait;
-      const tp = tip(t("g_tip_pd", r.est.id, fmtMs(a), fmtMs(m), fmtMs(z)));
-      if (a > t1) b += `<text x="${W - 8}" y="${y + 14}" text-anchor="end" style="fill:var(--warn)"${tp}>${esc(t("g_beyond", fmtMs(m)))}</text>`;
-      else {
-        b += `<rect x="${cx(m)}" y="${y + 8}" width="${Math.max(cx(m + lim * 3.6e6) - cx(m), 0)}" height="4" fill="var(--warn)" opacity="0.18"/>`
-          + `<rect x="${cx(a)}" y="${y + 3}" width="${Math.max(cx(z) - cx(a), 2)}" height="14" rx="2" fill="var(--warn)" opacity="${dep ? 0.12 : 0.32}"${dep ? ` stroke="var(--warn)" stroke-dasharray="3 2"` : ""}${tp}/>`
-          + (m <= t1 ? `<rect x="${cx(m) - 1}" y="${y + 2}" width="2.5" height="16" fill="var(--warn)"${tp}/>` : "");
+    const nRunT = r.run.reduce((a, j) => a + nT(j), 0), nPendT = r.pend.reduce((a, j) => a + nT(j), 0);
+    const cntLen = (nRunT ? `R${nRunT} ` : "").length + (nPendT ? `PD${nPendT}` : "").length;
+    const label = `${g.cluster} · ${g.name}`, maxCh = Math.max(Math.floor((LW - 10 - cntLen * 6.2) / 6.6), 4);
+    const cntTxt = (nRunT ? `<tspan style="fill:var(--ok)">R${nRunT}</tspan> ` : "") + (nPendT ? `<tspan style="fill:var(--warn)">PD${nPendT}</tspan>` : "");
+    b += `<g class="row" data-jump="${esc(jobKey(rep))}"><rect class="hl" x="0" y="${y}" width="${W}" height="${h}" fill="transparent"/>`
+      + `<text class="lab" x="4" y="${y + 14}"${tip(`${label}  ×${g.nTasks}\n${cnt}\n${t("g_click")}`)}>${esc(label.length > maxCh ? label.slice(0, maxCh - 1) + "…" : label)}</text>`
+      + `<text x="${LW - 6}" y="${y + 14}" text-anchor="end" style="font-size:11px">${cntTxt}</text>`;
+    const run = [...r.run].sort((p, q) => (tms(p.start) || now) - (tms(q.start) || now));
+    run.slice(0, nRun).forEach((j, k) => {
+      const [ly, lh] = lane(k);
+      const s = tms(j.start) || now, lim = durH(j.time_limit) || 24, e = s + lim * 3.6e6;
+      const more = k === nRun - 1 && run.length > nRun ? "\n" + t("g_more_tasks", run.length - nRun) : "";
+      const tp = tip(t("g_tip_run", j.id, fmtTime(j.start), j.time_limit || "-") + (j.nodelist ? "  @" + j.nodelist : "") + more);
+      if (e > t0) b += `<rect x="${cx(s)}" y="${ly}" width="${Math.max(cx(now) - cx(s), 1)}" height="${lh}" rx="1.5" fill="var(--ok)"${tp}/>`
+        + `<rect x="${cx(now)}" y="${ly}" width="${Math.max(cx(e) - cx(now), 0)}" height="${lh}" rx="1.5" fill="var(--ok)" opacity="0.22"${tp}/>`;
+    });
+    if (r.pend.length){
+      const [ly, lh] = lanes <= 1 ? [y + 3, 14] : [y + 3 + nRun * 7 - 1, 7];
+      const mid = ly + lh / 2;
+      if (r.est){
+        const [a, m, z] = r.est.ml_est.start.map(tms), lim = durH(r.est.time_limit) || 24, dep = !!r.est.dep_wait;
+        const tp = tip(t("g_tip_pd", r.est.id, fmtMs(a), fmtMs(m), fmtMs(z)) + (nPendT > 1 ? "\n" + t("g_pend_n", nPendT) : ""));
+        if (a > t1) b += `<text x="${W - 8}" y="${mid + 4}" text-anchor="end" style="fill:var(--warn)"${tp}>${esc(t("g_beyond", fmtMs(m)))}</text>`;
+        else {
+          b += `<rect x="${cx(m)}" y="${mid - 2}" width="${Math.max(cx(m + lim * 3.6e6) - cx(m), 0)}" height="4" fill="var(--warn)" opacity="0.18"/>`
+            + `<rect x="${cx(a)}" y="${ly}" width="${Math.max(cx(z) - cx(a), 2)}" height="${lh}" rx="2" fill="var(--warn)" opacity="${dep ? 0.12 : 0.32}"${dep ? ` stroke="var(--warn)" stroke-dasharray="3 2"` : ""}${tp}/>`
+            + (m <= t1 ? `<rect x="${cx(m) - 1}" y="${ly - 1}" width="2.5" height="${lh + 2}" fill="var(--warn)"${tp}/>` : "");
+        }
+      } else {
+        // 没有模型预测（还没训练 / 这类 job 预测不了）：从现在开始一条虚线框，表示"在排队，什么时候开始不知道"
+        const p0 = r.pend[0], dep = r.pend.every(j => j.dep_wait);
+        const tp = tip(t("g_tip_pd_none", p0.id, nPendT, p0.reason || "-") + (p0.wait_est ? "\n" + t("w_backlog") + " " + fmtH(p0.wait_est.bottleneck.min) + " – " + fmtH(p0.wait_est.bottleneck.max) : ""));
+        b += `<rect x="${cx(now)}" y="${ly}" width="${Math.max(W - 8 - cx(now), 2)}" height="${lh}" rx="2" fill="var(--warn)" fill-opacity="${dep ? 0.06 : 0.16}" stroke="var(--warn)" stroke-opacity="0.8" stroke-dasharray="3 2"${tp}/>`;
       }
     }
     b += `</g>`;
+    y += h;
   });
   const xn = x(now);
   b += `<line x1="${xn}" x2="${xn}" y1="-18" y2="${H}" stroke="var(--text)" stroke-dasharray="3 3"/><text x="${xn + 4}" y="-18" style="fill:var(--text)">${esc(t("g_now"))}</text>`;
@@ -1172,12 +1225,20 @@ function depsCell(j){
   if (!j.deps || !j.deps.length) return "";
   return j.deps.map(d => {
     if (!d.id) return `<span class="dep">${esc(d.type)}</span>`;
-    const target = jobsByKey[j.cluster + ":" + d.id];
+    const ts = depTargets(j.cluster, d.id);
+    const target = ts.length === 1 ? ts[0] : ts.find(x => ACTIVE.has(x.state)) || ts.find(x => PEND.has(x.state)) || ts[ts.length - 1];
     const st = target ? target.state : "UNKNOWN";
     const sameName = target && target.name === j.name;
-    const label = target ? (sameName ? "" : " " + target.name) : t("not_in_history");
-    const tip = `${d.type}:${d.id}${d.status ? " (" + d.status + ")" : ""} → ${st}${target ? " " + target.name : ""}`;
-    return `<span class="dep" data-jump="${esc(j.cluster + ":" + d.id)}" title="${esc(tip)}">`
+    let label = target ? (sameName ? "" : " " + target.name) : t("not_in_history");
+    let tip = `${d.type}:${d.id}${d.status ? " (" + d.status + ")" : ""} → ${st}${target ? " " + target.name : ""}`;
+    if (ts.length > 1){  // 指向 array：各状态的 task 数
+      const c = {};
+      ts.forEach(x => c[dispState(x)] = (c[dispState(x)] || 0) + nT(x));
+      const sum = Object.entries(c).map(([k, v]) => `${SHORT[k] || k} ${v}`).join(" · ");
+      label += ` [${sum}]`;
+      tip = `${d.type}:${d.id}${d.status ? " (" + d.status + ")" : ""} → ${t("array_dep", sum)}`;
+    }
+    return `<span class="dep" data-jump="${esc(j.cluster + ":" + (target ? target.id : d.id))}" title="${esc(tip)}">`
       + `<span class="dot" style="--c:${colorFor(st)}"></span>${esc(d.type)} <b>#${esc(d.id)}</b>${esc(label)}</span>`;
   }).join("");
 }
@@ -1193,7 +1254,7 @@ function jobTip(j){
 function jobCells(j, nameHtml){
   return `<td class="name" title="${esc(jobTip(j))}">${nameHtml}</td>
     <td>${esc(j.cluster)}</td>
-    <td class="jid" data-copy="${esc(j.id)}" title="${t("click_copy")}">${esc(j.id)}</td>
+    <td class="jid" data-copy="${esc(j.id)}" title="${t("click_copy")}">${esc(j.id)}${taskTag(j)}</td>
     <td>${stBadge(dispState(j))}</td>
     <td>${esc(j.qos || "-")}</td>
     <td class="part" title="${esc(j.partition)}">${esc(j.partition || "-")}</td>
@@ -1214,9 +1275,9 @@ function groupRow(g){
   const where = g.nRunning > 1 ? `${whereCell(j)} <span class="muted">${t("n_running_more", g.nRunning - 1)}</span>` : whereCell(j);
   return `<tr class="grp ${open ? "open" : ""}${j.stale ? " stale" : ""}" data-group="${esc(g.key)}" id="row-${esc(jobKey(j))}">
     <td class="tog"><span class="tri">▶</span></td>
-    <td class="name" title="${esc(g.name)}  (${t("n_jobs", g.jobs.length)})">${esc(g.name)}<span class="count">×${g.jobs.length}</span></td>
+    <td class="name" title="${esc(g.name)}  (${t("n_jobs", g.nTasks)})">${esc(g.name)}<span class="count">×${g.nTasks}</span></td>
     <td>${esc(g.cluster)}</td>
-    <td class="jid" data-copy="${esc(j.id)}" title="${t("click_copy")}">${esc(j.id)}</td>
+    <td class="jid" data-copy="${esc(j.id)}" title="${t("click_copy")}">${esc(j.id)}${taskTag(j)}</td>
     <td>${stBadge(dispState(j))}<span class="cnts">${countPills(g)}</span></td>
     <td>${esc(g.qosList.join(", ") || "-")}</td>
     <td class="part" title="${esc(j.partition)}">${esc(j.partition || "-")}</td>
@@ -1306,7 +1367,7 @@ function renderJobs(){
   const rows = [], wantInspect = [];
   let nJobs = 0;
   for (const g of groups){
-    nJobs += g.jobs.length;
+    nJobs += g.nTasks;
     g.jobs.forEach(j => groupOfJob[jobKey(j)] = g.key);
     if (g.jobs.length === 1){
       // 单个 job 也能展开，看它的工作目录
@@ -1663,7 +1724,7 @@ function renderDone(){
     <th>${t("done_exit")}</th><th>QoS</th><th>${t("col_partition")}</th><th>${t("done_ran")}</th><th>${t("done_end")}</th></tr></thead><tbody>`
     + jobs.map(j => `<tr data-jump="${esc(jobKey(j))}" title="${esc(j.gone ? t("done_gone_tip") : jobTip(j))}">
       <td class="name">${esc(j.name)}</td><td>${esc(j.cluster)}</td>
-      <td class="jid" data-copy="${esc(j.id)}" title="${t("click_copy")}">${esc(j.id)}</td>
+      <td class="jid" data-copy="${esc(j.id)}" title="${t("click_copy")}">${esc(j.id)}${taskTag(j)}</td>
       <td>${j.gone ? `<span class="tag full">${t("done_gone")}</span>` : stBadge(j.state)}</td>
       <td>${j.gone ? "" : exitCell(j)}</td><td>${esc(j.qos || "-")}</td><td class="part">${esc(j.partition || "-")}</td>
       <td class="num">${j.gone ? "" : `${esc(j.time_used || "-")} <span class="muted">/ ${esc(j.time_limit || "-")}</span>`}</td>
