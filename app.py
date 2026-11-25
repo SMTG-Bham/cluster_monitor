@@ -364,12 +364,15 @@ class Backend:
     def annotate(self, r):
         """标出不会开始的排队 job（never_run = 匹配到的原因），再给其余排队 job 加上
         模型预测的开始时间（ml_est）"""
-        pats = self.config.get("never_run_reasons", DEFAULT_NEVER_RUN) or []
         sides = dependency_sides(r.get("jobs", {}))
+        sched = self.scheduler_for(r.get("name"))
         for jid, j in r.get("jobs", {}).items():
             j["n_tasks"] = array_tasks(jid)  # 排队中的 array 合并记录代表几个 task，其它都是 1
-            reason = (j.get("reason") or "").strip("()") if j["state"] in PENDING else ""
-            j["never_run"] = reason if reason and any(fnmatch.fnmatchcase(reason, p) for p in pats) else ""
+            # never_run = 不会自己开始的排队原因；其中 held = 被挂起、自己 release 就能跑，
+            # 其余是真的跑不起来（要改参数 / 重交）
+            kind = self.stuck_kind(sched, j)
+            j["never_run"] = (j.get("reason") or "").strip("()") if kind else ""
+            j["held"] = kind == "held"
             # 在排队，但还在等前置 job：前端单独显示成"等依赖"，不算真正在排队
             j["dep_wait"] = j["state"] in PENDING and waiting_on_dependency(j)
             j["dep_on"] = sides.get(jid, "")  # run = 依赖链的根在跑，queue = 根还在排队
@@ -706,6 +709,25 @@ class Backend:
                              "shared": [x for x in by_dir[dk] if x != j["id"]]}
         return view, pending
 
+    def stuck_kind(self, sched, j):
+        """排队中、但排原因说明不会自己开始的：'held' = 被挂起，自己 release 就能跑；
+        'never' = 真的跑不起来（要改参数 / 重交）；其它返回 ''"""
+        if j["state"] not in PENDING:
+            return ""
+        reason = (j.get("reason") or "").strip("()")
+        pats = self.config.get("never_run_reasons", DEFAULT_NEVER_RUN) or []
+        if not reason or not any(fnmatch.fnmatchcase(reason, p) for p in pats):
+            return ""
+        return "held" if sched and sched.releasable(reason) else "never"
+
+    def scheduler_for(self, cluster):
+        """config 里这个集群的 Scheduler 对象；集群不在 config 里了 / 类型不认识时 None"""
+        c = next((c for c in self.config.get("clusters", []) if c.get("name") == cluster), None)
+        try:
+            return schedulers.make(c, self.config) if c else None
+        except (KeyError, ValueError):
+            return None
+
     def alerts(self, jobs):
         """界面上的小提醒。调用方已持有 self.lock。"""
         out = []
@@ -716,15 +738,13 @@ class Backend:
         for j in jobs:
             if j.get("never_run") and j.get("live", True):
                 never.setdefault((j["cluster"], j["never_run"]), []).append(j)
-        ccfg = {c["name"]: c for c in self.config.get("clusters", [])}
         for (cluster, reason), js in sorted(never.items()):
             ids = sorted((j["id"] for j in js), key=sort_jobid)
-            try:  # 自己能放出来的（BadConstraints、被自己 hold 的）给一条命令
-                release = schedulers.make(ccfg[cluster], self.config).release_command(reason, ids)
-            except (KeyError, ValueError):
-                release = None
+            sched = self.scheduler_for(cluster)  # 自己能放出来的（BadConstraints、被自己 hold 的）给一条命令
             out.append({"type": "never_run", "cluster": cluster, "reason": reason, "jobs": ids,
-                        "release": release, "stale": any(j.get("stale") for j in js)})
+                        "held": bool(sched) and sched.releasable(reason),
+                        "release": sched.release_command(reason, ids) if sched else None,
+                        "stale": any(j.get("stale") for j in js)})
         # 1) 好几个 job 同时在同一个目录里跑（一般是 dependency 没设对）
         #    同一个 array job 的不同 task 共用目录是正常的，不算
         running = {}
@@ -869,7 +889,8 @@ class Backend:
                 if jid in jobs:
                     jobs[jid]["prio"] = p
 
-        qos_table = self.build_qos_table(c, jobs, cached, load, with_load)
+        stuck = {jid: self.stuck_kind(sched, j) for jid, j in jobs.items()}
+        qos_table = self.build_qos_table(c, jobs, cached, load, with_load, stuck)
         bl_result = bl_cached["result"] if bl_cached else None
         return {"name": name, "ok": True, "error": None, "warnings": warnings,
                 "history_ok": sched.has("history") and sched.HISTORY_SECTION not in failed,
@@ -878,10 +899,10 @@ class Backend:
                 "backlog": bl_result, "fairshare": fairshare, "jobs": jobs, "qos": qos_table,
                 "overview": self.build_overview(c, jobs, qos_table, part_info, combo_load,
                                                 with_load and sched.PARTITION_LOAD,
-                                                cached["limits"], bl_result)}
+                                                cached["limits"], bl_result, stuck)}
 
     @staticmethod
-    def build_overview(c, jobs, qos_table, part_info, combo, with_combo, limits, bl):
+    def build_overview(c, jobs, qos_table, part_info, combo, with_combo, limits, bl, stuck=None):
         """QoS → 分区 的树：QoS 面板、分区表、排队积压合成一张。
 
         Slurm 里 QoS 和分区是两回事：分区 = 一批节点（在哪跑），QoS = 规则（限额、优先级、
@@ -898,18 +919,24 @@ class Backend:
         seen = set(combo)  # 见过的 (QoS, 分区)
         mine = {}  # (QoS, 分区) -> 我的 运行/排队
         sides = dependency_sides(jobs)
+        stuck = stuck or {}
         for jid, j in jobs.items():
             q = j.get("qos") or ""
             for p in parts_of(j):
                 seen.add((q, p))
                 if j["state"] in ACTIVE | PENDING:
-                    # pending 里包括等依赖的（dep）；其中 dep_run = 依赖链的根在跑的。
-                    # 前端：运行 (+dep_run) / 排队 (+其余等依赖的)
-                    m = mine.setdefault((q, p), {"running": 0, "pending": 0, "dep": 0, "dep_run": 0})
+                    # pending 里包括等依赖的（dep，其中 dep_run = 依赖链的根在跑的）、被挂起的（held）
+                    # 和不会开始的（never），这三种互不重叠。前端：运行 (+dep_run) / 排队 (+其余等依赖的) + 挂起 + 不会开始
+                    m = mine.setdefault((q, p), {"running": 0, "pending": 0, "dep": 0, "dep_run": 0,
+                                                 "held": 0, "never": 0})
                     n = ntasks(j)  # array：按 task 数（QoS 的 MaxJobsPU 也是按 task 算的）
                     m["running" if j["state"] in ACTIVE else "pending"] += n
-                    m["dep"] += n * (jid in sides)
-                    m["dep_run"] += n * (sides.get(jid) == "run")
+                    k = stuck.get(jid, "")
+                    if k:
+                        m[k] += n
+                    else:
+                        m["dep"] += n * (jid in sides)
+                        m["dep_run"] += n * (sides.get(jid) == "run")
 
         parts = {r["name"]: dict(r) for r in part_info or []}
         for _, p in sorted(seen):  # 只在 job 里见过的分区（比如 SGE 的并行环境）
@@ -923,6 +950,8 @@ class Backend:
                 "mine_pending": sum(v["pending"] for v in tot_m),
                 "mine_dep": sum(v["dep"] for v in tot_m),
                 "mine_dep_run": sum(v["dep_run"] for v in tot_m),
+                "mine_held": sum(v["held"] for v in tot_m),
+                "mine_never": sum(v["never"] for v in tot_m),
                 "all_running": sum(v["running"] for v in tot_a) if with_combo else None,
                 "all_pending": sum(v["pending"] for v in tot_a) if with_combo else None,
                 "part_qos_limits": limits.get(info.get("part_qos")) if info.get("part_qos") else None,
@@ -956,6 +985,7 @@ class Backend:
                 children.append({"name": p, "mine_running": m.get("running", 0),
                                  "mine_pending": m.get("pending", 0), "mine_dep": m.get("dep", 0),
                                  "mine_dep_run": m.get("dep_run", 0),
+                                 "mine_held": m.get("held", 0), "mine_never": m.get("never", 0),
                                  "all_running": a.get("running", 0) if with_combo else None,
                                  "all_pending": a.get("pending", 0) if with_combo else None})
             groups.append({"qos": row["name"], "children": children})
@@ -977,7 +1007,7 @@ class Backend:
                 "part_info": part_info is not None}
 
     @staticmethod
-    def build_qos_table(c, jobs, cached, load, with_load):
+    def build_qos_table(c, jobs, cached, load, with_load, stuck=None):
         """QoS 列表优先用 config.yaml 里写的；没写就用 sacctmgr assoc 查到的；
         再补上你当前 job 实际用到的 QoS。"""
         configured = normalize_qos_config(c.get("qos"))
@@ -990,6 +1020,7 @@ class Backend:
                 rows.append({"name": q, "note": ""})
                 seen.add(q)
         sides = dependency_sides(jobs)
+        stuck = stuck or {}
 
         table = []
         for r in rows:
@@ -1003,9 +1034,12 @@ class Backend:
                 # array 按 task 数算（排队中的 123_[1-100] 是 100 个）
                 "mine_running": sum(ntasks(j) for j in mine if j["state"] in ACTIVE),
                 "mine_pending": sum(ntasks(j) for j in mine if j["state"] in PENDING),
-                # 其中在等依赖的（不算真正在排队；mine_pending 仍然包括它们，waitlog / 模型用的是这个）
-                "mine_dep": sum(ntasks(j) for j in mine if j["id"] in sides),
-                "mine_dep_run": sum(ntasks(j) for j in mine if sides.get(j["id"]) == "run"),
+                # 其中在等依赖 / 被挂起 / 不会开始的（都不算真正在排队，互不重叠；
+                # mine_pending 仍然包括它们，waitlog / 模型用的是这个）
+                "mine_dep": sum(ntasks(j) for j in mine if j["id"] in sides and not stuck.get(j["id"])),
+                "mine_dep_run": sum(ntasks(j) for j in mine if sides.get(j["id"]) == "run" and not stuck.get(j["id"])),
+                "mine_held": sum(ntasks(j) for j in mine if stuck.get(j["id"]) == "held"),
+                "mine_never": sum(ntasks(j) for j in mine if stuck.get(j["id"]) == "never"),
                 "all_running": load.get(q, {}).get("running", 0) if with_load else None,
                 "all_pending": load.get(q, {}).get("pending", 0) if with_load else None,
                 "max_jobs_pu": lim.get("max_jobs_pu", ""),

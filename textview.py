@@ -110,9 +110,11 @@ def counts_text(r, m="mine"):
     if run is None or pd is None:
         return "-"
     dep, dep_run = r.get(f"{m}_dep") or 0, r.get(f"{m}_dep_run") or 0
+    held, never = r.get(f"{m}_held") or 0, r.get(f"{m}_never") or 0  # 被挂起 / 不会开始：不算排队
     left = f"{run} (+{dep_run})" if dep_run else f"{run}"
-    right = f"{pd - dep} (+{dep - dep_run})" if dep - dep_run else f"{pd - dep}"
-    return f"{left} / {right}"
+    q = pd - dep - held - never
+    right = f"{q} (+{dep - dep_run})" if dep - dep_run else f"{q}"
+    return f"{left} / {right}" + (f", {held} held" if held else "") + (f", {never} won't start" if never else "")
 
 
 def when_text(j):
@@ -121,6 +123,8 @@ def when_text(j):
         return f"started {ct(j.get('start'))}"
     if j["state"] not in PENDING:
         return f"ended {ct(j.get('end'))}"
+    if j.get("held"):
+        return f"HELD, release to run ({j['never_run']})"
     if j.get("never_run"):
         return f"WILL NOT START ({j['never_run']})"
     bits = []
@@ -232,7 +236,7 @@ def clusters_text(state):
             continue
         qos = c.get("qos") or []
         tot = {k: sum(q.get(k) or 0 for q in qos) for k in
-               ("mine_running", "mine_pending", "mine_dep", "mine_dep_run")}
+               ("mine_running", "mine_pending", "mine_dep", "mine_dep_run", "mine_held", "mine_never")}
         status = "ok" if c["ok"] else (f"STALE since {lt(c['stale_since'])}: {en(c.get('error'))}"
                                        if c.get("stale_since") else f"ERROR: {en(c.get('error'))}")
         rows.append([c["name"], status, f"data {lt(c.get('at'))}", f"mine run (+dep) / pend (+dep): {counts_text(tot)}"])
@@ -254,7 +258,7 @@ def alerts_text(state):
         jobs = " ".join(a.get("jobs", [])[:20]) + (f" ... ({len(a['jobs'])} jobs)" if len(a.get("jobs", [])) > 20 else "")
         t = a["type"]
         if t == "never_run":
-            lines.append(f"- NEVER RUN  {a['cluster']}  reason {a['reason']}: {jobs}")
+            lines.append(f"- {'HELD' if a.get('held') else 'NEVER RUN'}  {a['cluster']}  reason {a['reason']}: {jobs}")
             if a.get("release"):
                 lines.append(f"    try releasing (run on {a['cluster']}): {a['release']}")
         elif t == "same_dir":

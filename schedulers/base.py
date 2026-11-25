@@ -112,10 +112,14 @@ class Scheduler(ABC):
             "jobs": {jobid: 你排队中的 job 的优先级、各项、每个分区前面还有几个}}；拿不到返回 None"""
         return None
 
+    def releasable(self, reason):
+        """排队原因是"被挂起"、用户自己 release 一下就能跑的（JobHeldUser、BadConstraints ……）"""
+        return bool(reason) and any(fnmatch.fnmatchcase(reason, p) for p in self.RELEASABLE)
+
     def release_command(self, reason, ids):
         """reason 是用户自己能放出来的，返回放出命令（一条，所有 job），否则 None"""
         tpl = self.cluster.get("release_command") or self.config.get("release_command") or self.RELEASE_COMMAND
-        if not tpl or not ids or not any(fnmatch.fnmatchcase(reason, p) for p in self.RELEASABLE):
+        if not tpl or not ids or not self.releasable(reason):
             return None
         # array 的排队记录 123_[5-100] 带方括号，要加引号免得被 shell 当成通配符
         q = [shlex.quote(i) if "[" in i else i for i in ids]

@@ -8,9 +8,9 @@
   :root{
     --bg:#0f1117; --panel:#161922; --panel2:#1b1f2a; --border:#2a2e3a; --text:#e6e8ee; --muted:#8b90a0;
     --accent:#5b8def; --row-hover:#1e2330; --child:#12151d;
-    --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c;
+    --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c; --held:#5dade2;
     /* 图表：分类色（色盲校验过，暗色背景）+ 别人 / 宕机的灰 */
-    --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c-other:#3a4052; --c-down:#4a5063; --c-grid:#232733;
+    --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c-other:#3a4052; --c-down:#4a5063; --c-idle:#2b3142; --c-grid:#232733;
   }
   *{box-sizing:border-box;}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);font-size:13px;}
@@ -53,7 +53,7 @@
   .qos tr.mine-row td.qname{font-weight:600;}
   .qos .idle-n{color:var(--ok);}
   #partChip{cursor:pointer;}
-  .n-r{color:var(--ok);} .n-pd{color:var(--warn);} .n-0{color:#4a5063;}
+  .n-r{color:var(--ok);} .n-pd{color:var(--warn);} .n-held{color:var(--held);} .n-never{color:var(--bad);} .n-0{color:#4a5063;}
   .tag{display:inline-block;font-size:10px;padding:0 5px;border-radius:3px;margin-left:5px;vertical-align:1px;}
   .tag.full{background:#4a3b10;color:var(--warn);} .tag.subfull{background:#4a1c1c;color:#ff9d9d;}
   .tag.cfg{background:#1f2c48;color:#9db8f5;}
@@ -101,7 +101,7 @@
   .qos tr.open .tri{transform:rotate(90deg);}
   .qos td.limits{white-space:normal;color:var(--muted);font-size:12px;min-width:150px;}
   .qos td.limits b{font-weight:500;color:var(--text);}
-  .h-ok{color:var(--ok);} .h-mid{color:var(--warn);} .h-bad{color:#ff7b6b;}
+  .h-ok{color:var(--ok);} .h-mid{color:var(--warn);} .h-bad{color:#ff7b6b;} .h-held{color:var(--held);}
   .card-foot{padding:7px 12px;font-size:12px;color:var(--muted);border-top:1px solid var(--border);}
   .card-foot b{color:var(--text);font-weight:500;}
   details.cut{border-top:1px solid var(--border);}
@@ -148,6 +148,7 @@
   .alertbox .ai{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline;padding:2px 0;}
   .alertbox .ai .k{display:inline-block;font-size:10px;padding:0 5px;border-radius:3px;background:#4a3b10;color:var(--warn);}
   .alertbox .ai .k.big{background:#4a1c1c;color:#ff9d9d;}
+  .alertbox .ai .k.held{background:#163246;color:var(--held);}
   .alertbox .ai .p{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted);word-break:break-all;cursor:copy;}
   .alertbox .ai .p:hover{color:var(--accent);}
   .alertbox .ai .cmd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#1b1f2a;border:1px solid var(--border);border-radius:4px;padding:0 6px;color:var(--text);word-break:break-all;cursor:copy;}
@@ -194,6 +195,13 @@
   .viz .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;}
   .viz .legend i.line{height:2px;width:12px;vertical-align:3px;}
   .viz .empty{padding:14px 0;}
+  .viz .pies{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px 18px;margin:2px 0 4px;}
+  .viz .pie{display:flex;gap:12px;align-items:center;min-width:0;}
+  .viz .pie svg{flex:none;}
+  .viz .pie .pt{min-width:0;font-size:12px;color:var(--muted);line-height:1.55;}
+  .viz .pie .pt b{color:var(--text);font-size:13px;}
+  .viz .pie .pt .nr{color:var(--bad);} .viz .pie .pt .nh{color:var(--held);}
+  .viz .legend i.hatch{background:repeating-linear-gradient(45deg,var(--c-down) 0 2px,transparent 2px 4px);}
   .viz .small-multiples{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px 18px;}
   #vizTip{position:fixed;pointer-events:none;background:var(--panel2);border:1px solid var(--border);border-radius:6px;
     padding:6px 9px;font-size:12px;white-space:pre;z-index:50;display:none;box-shadow:0 2px 10px #0009;color:var(--text);}
@@ -228,6 +236,8 @@
     <option value="running" data-i18n="f_running"></option>
     <option value="pending" data-i18n="f_pending"></option>
     <option value="dep" data-i18n="f_dep"></option>
+    <option value="held" data-i18n="f_held"></option>
+    <option value="never" data-i18n="f_never"></option>
     <option value="just_done" data-i18n="f_just_done"></option>
     <option value="done" data-i18n="f_done"></option>
     <option value="failed" data-i18n="f_failed"></option>
@@ -325,7 +335,7 @@ const I18N = {
     updated_at: s => "数据更新于 " + s,
     all_clusters: "所有集群", all_qos: "所有 QoS",
     f_all_states: "全部状态", f_active: "活跃（运行+排队）", f_running: "运行中", f_pending: "排队中（不含等依赖）",
-    f_dep: "等依赖", f_just_done: "上次刷新以来结束", f_done: "已结束", f_failed: "最近一个失败/取消",
+    f_dep: "等依赖", f_held: "被挂起（release 就能跑）", f_never: "不会开始（要改 / 重交）", f_just_done: "上次刷新以来结束", f_done: "已结束", f_failed: "最近一个失败/取消",
     search_ph: "搜索 job id / 名字 / 节点 / QoS",
     refresh: "立即刷新", refreshing: "刷新中…", queued_btn: "已加入队列",
     collapse: "收起", expand: "展开", expand_all: "全部展开", collapse_all: "全部收起", show_all: "显示全部",
@@ -360,7 +370,7 @@ const I18N = {
     load_private_tip: "这个集群的 squeue 只能看到你自己的 job（PrivateData），没法统计全集群",
     load_tip: "所有用户在这个 QoS 上 运行 / 排队 的 job 数", load_off_tip: "这个集群没有开全集群统计（disable: [cluster_load]）",
     sub_full: "提交已满", run_full: "运行已满", hidden: "隐藏",
-    mine_summary: (r, p, dr, dq) => `我的：<span class="n-r">${r}</span> 运行${dr ? `（<span class="dep-n" title="${esc(t("dep_tip_run"))}">+${dr}</span> 等依赖）` : ""} · <span class="n-pd">${p}</span> 排队${dq ? `（<span class="dep-n" title="${esc(t("dep_tip_queue"))}">+${dq}</span> 等依赖）` : ""}`,
+    mine_summary: (r, p, dr, dq, h, nv) => `我的：<span class="n-r">${r}</span> 运行${dr ? `（<span class="dep-n" title="${esc(t("dep_tip_run"))}">+${dr}</span> 等依赖）` : ""} · <span class="n-pd">${p}</span> 排队${dq ? `（<span class="dep-n" title="${esc(t("dep_tip_queue"))}">+${dq}</span> 等依赖）` : ""}${h ? ` · <span class="n-held" title="${esc(t("held_tip"))}">${h}</span> 挂起` : ""}${nv ? ` · <span class="n-never" title="${esc(t("never_tip"))}">${nv}</span> 不会开始` : ""}`,
     dep_tip_run: "等依赖的 job，前置 job 正在跑：跑完就轮到它们（不算在排队）",
     dep_tip_queue: "等依赖的 job，前置 job（或者依赖链最前面的那个）还在排队：要等它排到、跑完才会开始（不算在排队）",
     data_at: s => `${s} 的数据`,
@@ -380,7 +390,7 @@ const I18N = {
     not_in_list: "这个 job 不在当前列表里（可能被筛选掉或超出历史窗口）",
     bg: "后台：", bg_working: "处理中", bg_steps: (d, n) => `（${d}/${n} 步）`, bg_more: n => ` · 还有 ${n} 个任务`,
     server_down: "连不上本机的 dashboard 服务",
-    al_never_run: "不会开始",
+    al_never_run: "不会开始", al_held: "被挂起",
     nr_dep: "（依赖的 job 失败 / 取消了，这个永远等不到；scancel 掉重交）",
     nr_time: "（申请的时长超过分区上限，scontrol update 改短或者换分区）",
     nr_nodes: "（节点数不在分区允许范围，或者要的节点下线了）",
@@ -388,7 +398,7 @@ const I18N = {
     al_release: "试试放出来：", al_release_tip: "点击复制，在集群上运行。还是变回不会开始的话，说明确实没有节点满足要求，要改提交参数", copied_cmd: "已复制命令",
     nr_qos: "（这个 QoS 不能用在这个分区 / 账户）",
     nr_held: "（被 hold 了，scontrol release 放出来）", nr_held_admin: "（被管理员 hold 了）",
-    never_run_cell: "不会开始",
+    never_run_cell: "不会开始", held_cell: "被挂起，release 后才会排队",
     al_waitlog_full: "waitlog 已满", al_slow_loop: "LOOP 太慢", loop_slow: "慢",
     ov_title: "QoS / 分区 / 积压", ov_hint: "点 ▶ 展开 QoS 能用的分区 · 点一行按 QoS / 分区筛选下面的 job · 我的/全集群 = 运行 / 排队 · 节点、CPU = 已用 / 空闲 / 总数",
     ov_how: "QoS 和分区是什么关系",
@@ -460,7 +470,13 @@ const I18N = {
     auto_next: s => `下次自动刷新：${s}`,
     ml_n_tip: "这个 QoS + 分区历史上开始过几批 job（一起交的算一批；少于 3 批的预测不可靠，排在后面）",
     view_details: "详细数据", view_charts: "图表",
-    c_alloc: "在用", c_idle: "空闲", c_down: "宕机 / 维护",
+    c_alloc: "在用", c_idle: "空闲", c_down: "宕机 / 维护", c_mine_use: "我在跑的占用", c_others_use: "别人在用",
+    c_pie_log: "（扇区按对数比例，好让很小的部分也看得见；实际数字见右边和悬停提示）", c_used_pct: "在用",
+    c_use_line: (m, a, tot, unit) => `我占 ${m} · 在用 ${a} / ${tot} ${unit}`,
+    c_pie_tip: (p, lab, v, tot, unit) => `${p}：${lab} ${v} / ${tot} ${unit}`,
+    n_held: n => `${n} 挂起`, n_never: n => `${n} 不会开始`, n_dep: n => `${n} 等依赖`,
+    held_tip: "被挂起（JobHeldUser / BadConstraints ……），自己 release 一下就能跑；不算在排队里",
+    never_tip: "不会自己开始（依赖失败、超过分区上限 ……），要改参数或重交；不算在排队里",
     c_part_tip: (p, a, i, o, tot, unit) => `${p}：${unit} ${a} 在用 · ${i} 空闲 · ${o} 宕机/维护 · 共 ${tot}`,
     c_queued: n => `全集群排队 ${n}`, c_mine: (r, p) => `我的 ${r} 跑 / ${p} 排`, c_wait: w => `预计等 ${w}`,
     c_no_nodes: "看不到节点占用", c_nodes: "节点", c_cpus: "CPU",
@@ -472,7 +488,7 @@ const I18N = {
     c_run_only: (n, q) => `${n} 个在跑，没有排队` + (q ? `（别人排队 ${q} 个）` : ""),
     c_leg_run: "我在跑的", c_leg_mine: "我排队的", c_leg_others: "别人排队的",
     g_running: "在跑（淡色 = 到时限还剩）", g_pending: "预计开始 q20–q80（竖线 = 中位数，淡色 = 跑完的时间）",
-    g_dep: "等依赖（虚线）", g_now: "现在", g_more: n => `还有 ${n} 组没画，点“详细数据”看全部`,
+    g_dep: "等依赖（虚线）", g_held: "被挂起（release 就能跑）", g_never: "不会开始", g_now: "现在", g_more: n => `还有 ${n} 组没画，点“详细数据”看全部`,
     g_none: "没有符合筛选的在跑 / 排队的 job", g_click: "点一行跳到表格里",
     g_tip_run: (id, s, l) => `#${id} 在跑：${s} 开始，时限 ${l}`,
     g_tip_pd: (id, a, m, b) => `#${id} 预计开始 ${m}（多半在 ${a} – ${b}）`,
@@ -506,7 +522,7 @@ const I18N = {
     never_refreshed: "Not refreshed yet",
     updated_at: s => "Updated " + s,
     all_clusters: "All clusters", all_qos: "All QoS",
-    f_all_states: "All states", f_active: "Active (running + pending)", f_running: "Running", f_pending: "Pending (not deps)", f_dep: "Waiting on deps",
+    f_all_states: "All states", f_active: "Active (running + pending)", f_running: "Running", f_pending: "Pending (not deps)", f_dep: "Waiting on deps", f_held: "Held (release to run)", f_never: "Won't start (fix / resubmit)",
     f_just_done: "Finished since last refresh", f_done: "Finished", f_failed: "Last one failed/cancelled",
     search_ph: "Search job id / name / node / QoS",
     refresh: "Refresh", refreshing: "Refreshing…", queued_btn: "Queued",
@@ -542,7 +558,7 @@ const I18N = {
     load_private_tip: "squeue on this cluster only shows your own jobs (PrivateData), so cluster-wide numbers are unavailable",
     load_tip: "Running / pending jobs of all users in this QoS", load_off_tip: "Cluster-wide counts are off for this cluster (disable: [cluster_load])",
     sub_full: "submit cap", run_full: "run cap", hidden: "hidden",
-    mine_summary: (r, p, dr, dq) => `Mine: <span class="n-r">${r}</span> running${dr ? ` (<span class="dep-n" title="${esc(t("dep_tip_run"))}">+${dr}</span> waiting on deps)` : ""} · <span class="n-pd">${p}</span> pending${dq ? ` (<span class="dep-n" title="${esc(t("dep_tip_queue"))}">+${dq}</span> waiting on deps)` : ""}`,
+    mine_summary: (r, p, dr, dq, h, nv) => `Mine: <span class="n-r">${r}</span> running${dr ? ` (<span class="dep-n" title="${esc(t("dep_tip_run"))}">+${dr}</span> waiting on deps)` : ""} · <span class="n-pd">${p}</span> pending${dq ? ` (<span class="dep-n" title="${esc(t("dep_tip_queue"))}">+${dq}</span> waiting on deps)` : ""}${h ? ` · <span class="n-held" title="${esc(t("held_tip"))}">${h}</span> held` : ""}${nv ? ` · <span class="n-never" title="${esc(t("never_tip"))}">${nv}</span> won't start` : ""}`,
     dep_tip_run: "Waiting on dependencies whose predecessor is running: they're next once it ends (not counted as queueing)",
     dep_tip_queue: "Waiting on dependencies whose predecessor (or the head of the chain) is still queued: they start only after it gets through the queue and ends (not counted as queueing)",
     data_at: s => `data from ${s}`,
@@ -562,7 +578,7 @@ const I18N = {
     not_in_list: "This job isn't in the current list (filtered out or outside the history window)",
     bg: "Background: ", bg_working: "working", bg_steps: (d, n) => ` (${d}/${n} steps)`, bg_more: n => ` · ${n} more queued`,
     server_down: "Can't reach the local dashboard server",
-    al_never_run: "won't start",
+    al_never_run: "won't start", al_held: "held",
     nr_dep: "(a job it depends on failed / was cancelled; scancel and resubmit)",
     nr_time: "(time limit exceeds the partition's; shorten it with scontrol update or use another partition)",
     nr_nodes: "(node count outside the partition's limits, or required nodes are down)",
@@ -570,7 +586,7 @@ const I18N = {
     al_release: "try releasing:", al_release_tip: "Click to copy, run it on the cluster. If they go back to won't-start, no node really fits the request: change the job", copied_cmd: "Command copied",
     nr_qos: "(this QoS isn't allowed in this partition / account)",
     nr_held: "(held; scontrol release it)", nr_held_admin: "(held by an admin)",
-    never_run_cell: "won't start",
+    never_run_cell: "won't start", held_cell: "held: queues again once released",
     al_waitlog_full: "waitlog full", al_slow_loop: "slow LOOP", loop_slow: "slow",
     ov_title: "QoS / partitions / backlog", ov_hint: "Click ▶ to show the partitions a QoS can use · click a row to filter jobs by QoS / partition · Mine / Cluster = running / pending · Nodes, CPUs = allocated / idle / total",
     ov_how: "How do QoS and partitions relate?",
@@ -642,7 +658,13 @@ const I18N = {
     auto_next: s => `Next auto refresh: ${s}`,
     ml_n_tip: "Batches of jobs that started in this QoS + partition before (jobs submitted together = one batch; under 3 = unreliable, sorted last)",
     view_details: "Details", view_charts: "Charts",
-    c_alloc: "allocated", c_idle: "idle", c_down: "down / drained",
+    c_alloc: "allocated", c_idle: "idle", c_down: "down / drained", c_mine_use: "used by my running jobs", c_others_use: "used by others",
+    c_pie_log: "(slices are log-scaled so tiny shares stay visible; real numbers on the right and on hover)", c_used_pct: "in use",
+    c_use_line: (m, a, tot, unit) => `mine ${m} · in use ${a} / ${tot} ${unit}`,
+    c_pie_tip: (p, lab, v, tot, unit) => `${p}: ${lab} ${v} / ${tot} ${unit}`,
+    n_held: n => `${n} held`, n_never: n => `${n} won't start`, n_dep: n => `${n} on deps`,
+    held_tip: "Held (JobHeldUser / BadConstraints ...): release it yourself and it can run; not counted as queueing",
+    never_tip: "Won't start by itself (dependency failed, over the partition limit ...): fix or resubmit; not counted as queueing",
     c_part_tip: (p, a, i, o, tot, unit) => `${p}: ${unit} ${a} allocated · ${i} idle · ${o} down/drained · ${tot} total`,
     c_queued: n => `${n} queued (all users)`, c_mine: (r, p) => `mine ${r} run / ${p} queued`, c_wait: w => `wait ~${w}`,
     c_no_nodes: "node usage not visible", c_nodes: "nodes", c_cpus: "CPUs",
@@ -654,7 +676,7 @@ const I18N = {
     c_run_only: (n, q) => `${n} running, none queued` + (q ? ` (${q} queued by others)` : ""),
     c_leg_run: "mine running", c_leg_mine: "mine queued", c_leg_others: "others queued",
     g_running: "running (faded = left until time limit)", g_pending: "predicted start q20–q80 (tick = median, faded = run time)",
-    g_dep: "waiting on deps (dashed)", g_now: "now", g_more: n => `${n} more groups not drawn; see Details`,
+    g_dep: "waiting on deps (dashed)", g_held: "held (release to run)", g_never: "won't start", g_now: "now", g_more: n => `${n} more groups not drawn; see Details`,
     g_none: "No running / queued jobs match the filters", g_click: "Click a row to jump to it in the table",
     g_tip_run: (id, s, l) => `#${id} running: started ${s}, limit ${l}`,
     g_tip_pd: (id, a, m, b) => `#${id} predicted start ${m} (likely ${a} – ${b})`,
@@ -704,18 +726,18 @@ function applyStatic(){
 
 const STATE_COLOR = {
   RUNNING:"#2ecc71", COMPLETING:"#27ae60", CONFIGURING:"#27ae60",
-  PENDING:"#f1c40f", DEPEND:"#b39ddb", SUSPENDED:"#9b59b6", REQUEUED:"#f39c12", REQUEUE_HOLD:"#f39c12",
+  PENDING:"#f1c40f", DEPEND:"#b39ddb", HELD:"#5dade2", NEVER:"#e74c3c", SUSPENDED:"#9b59b6", REQUEUED:"#f39c12", REQUEUE_HOLD:"#f39c12",
   COMPLETED:"#6b7385", CANCELLED:"#e67e22", FAILED:"#e74c3c", TIMEOUT:"#c0392b",
   NODE_FAIL:"#c0392b", OUT_OF_MEMORY:"#c0392b", PREEMPTED:"#c0392b", BOOT_FAIL:"#c0392b", DEADLINE:"#c0392b",
 };
-const SHORT = {RUNNING:"R",COMPLETING:"CG",CONFIGURING:"CF",PENDING:"PD",DEPEND:"DEP",SUSPENDED:"S",REQUEUED:"RQ",
+const SHORT = {RUNNING:"R",COMPLETING:"CG",CONFIGURING:"CF",PENDING:"PD",DEPEND:"DEP",HELD:"H",NEVER:"NR",SUSPENDED:"S",REQUEUED:"RQ",
   COMPLETED:"CD",CANCELLED:"CA",FAILED:"F",TIMEOUT:"TO",NODE_FAIL:"NF",OUT_OF_MEMORY:"OOM",PREEMPTED:"PR"};
-const ORDER = ["RUNNING","COMPLETING","CONFIGURING","PENDING","DEPEND","SUSPENDED","REQUEUED","COMPLETED",
+const ORDER = ["RUNNING","COMPLETING","CONFIGURING","PENDING","DEPEND","HELD","NEVER","SUSPENDED","REQUEUED","COMPLETED",
   "FAILED","TIMEOUT","OUT_OF_MEMORY","NODE_FAIL","PREEMPTED","CANCELLED"];
 const ACTIVE = new Set(["RUNNING","COMPLETING","CONFIGURING"]);
 const PEND = new Set(["PENDING","SUSPENDED","REQUEUED","REQUEUE_HOLD","RESV_DEL_HOLD"]);
 const BAD = new Set(["FAILED","CANCELLED","TIMEOUT","NODE_FAIL","OUT_OF_MEMORY","PREEMPTED","BOOT_FAIL","DEADLINE"]);
-const LIGHT_TEXT = new Set(["COMPLETED","FAILED","TIMEOUT","NODE_FAIL","OUT_OF_MEMORY","PREEMPTED","BOOT_FAIL","DEADLINE","SUSPENDED"]);
+const LIGHT_TEXT = new Set(["NEVER","COMPLETED","FAILED","TIMEOUT","NODE_FAIL","OUT_OF_MEMORY","PREEMPTED","BOOT_FAIL","DEADLINE","SUSPENDED"]);
 
 const colorFor = s => STATE_COLOR[s] || "#3498db";
 // 集群的调度系统支持哪些功能（后端 schedulers/ 里声明；旧缓存里没有就当全都有）
@@ -754,9 +776,12 @@ let jobsByKey = {};
 let groupOfJob = {};
 let justDone = new Set();         // 上次刷新以来结束的 job（cluster:id）
 
-// 显示用的状态：排队中但还在等前置 job 的显示成 DEPEND（不算真正在排队）
-const dispState = j => PEND.has(j.state) && j.dep_wait ? "DEPEND" : j.state;
-const queueing = j => PEND.has(j.state) && !j.dep_wait;
+// 显示用的状态（排队中的再细分，都不算真正在排队）：
+//   HELD  = 被挂起（JobHeldUser / BadConstraints ……），自己 release 一下就能跑（蓝）
+//   NEVER = 永远跑不起来（依赖失败、超过分区上限 ……），要改参数或重交（红）
+//   DEPEND = 还在等前置 job
+const dispState = j => !PEND.has(j.state) ? j.state : j.held ? "HELD" : j.never_run ? "NEVER" : j.dep_wait ? "DEPEND" : j.state;
+const queueing = j => PEND.has(j.state) && !j.dep_wait && !j.never_run;
 function stBadge(s){
   return `<span class="st ${LIGHT_TEXT.has(s) ? "light" : ""}" style="--c:${colorFor(s)}">${esc(s)}</span>`;
 }
@@ -803,7 +828,9 @@ function groupVisible(g){
     case "active":  if (g.rank > 1) return false; break;
     case "running": if (g.rank !== 0) return false; break;
     case "pending": if (!g.jobs.some(queueing)) return false; break;
-    case "dep":     if (!g.jobs.some(j => PEND.has(j.state) && j.dep_wait)) return false; break;
+    case "dep":     if (!g.jobs.some(j => dispState(j) === "DEPEND")) return false; break;
+    case "held":    if (!g.jobs.some(j => dispState(j) === "HELD")) return false; break;
+    case "never":   if (!g.jobs.some(j => dispState(j) === "NEVER")) return false; break;
     case "just_done": if (!g.jobs.some(j => justDone.has(jobKey(j)))) return false; break;
     case "done":    if (g.rank !== 2) return false; break;
     case "failed":  if (g.rank !== 2 || !BAD.has(s)) return false; break;
@@ -878,36 +905,70 @@ function cardChart(c, ov, rankBy, fsParts, runBy){
   const parts = {};
   for (const g of ov.groups) for (const ch of g.children){
     if (ch.hidden) continue;
-    const a = parts[ch.name] || (parts[ch.name] = {r: 0, p: 0, ml: null});
-    a.r += ch.mine_running || 0; a.p += (ch.mine_pending || 0);
+    const a = parts[ch.name] || (parts[ch.name] = {r: 0, p: 0, d: 0, h: 0, nv: 0, ml: null});
+    a.r += ch.mine_running || 0; a.p += (ch.mine_pending || 0); a.d += ch.mine_dep || 0;
+    a.h += ch.mine_held || 0; a.nv += ch.mine_never || 0;
     if (ch.ml && (!a.ml || ch.ml.wait[1] < a.ml.wait[1])) a.ml = ch.ml;
   }
+  // 我在跑的 job 在每个分区占了多少 CPU / 节点（饼图里单独一块）
+  const myUse = {};
+  for (const j of lastData.jobs || []){
+    if (j.cluster !== c.name || !ACTIVE.has(j.state) || !j.partition) continue;
+    const u = myUse[j.partition] || (myUse[j.partition] = {cpus: 0, nodes: 0});
+    u.cpus += parseInt(j.cpus, 10) || 0; u.nodes += parseInt(j.nnodes, 10) || 0;
+  }
   const names = Object.keys(parts);
-  let y = 0, body = "", anyBar = false;
-  for (const name of names){
-    const p = (ov.partitions || {})[name] || {}, a = parts[name];
-    const u = p.nodes && p.nodes.idle !== undefined ? [p.nodes, t("c_nodes")] : p.cpus && p.cpus.idle !== undefined ? [p.cpus, t("c_cpus")] : null;
-    body += `<text class="lab" x="${LX}" y="${y + 14}">${esc(name.length > 22 ? name.slice(0, 21) + "…" : name)}</text>`;
-    if (u){
-      const [n, unit] = u, x = lin(0, n.total, BX, BX + BW);
-      anyBar = true;
-      const segs = [[n.alloc, "var(--c1)"], [n.idle, "var(--c3)"], [n.other || 0, "var(--c-down)"]];
-      let x0 = BX;
-      const tipS = t("c_part_tip", name, n.alloc, n.idle, n.other || 0, n.total, unit);
-      for (const [v, col] of segs){
-        if (!v) continue;
-        const wd = Math.max(x(v) - BX - 2, 1.5);
-        body += `<rect x="${x0}" y="${y + 4}" width="${wd}" height="13" rx="2" fill="${col}"${tip(tipS)}/>`;
-        x0 += wd + 2;
-      }
-    } else body += `<text x="${BX}" y="${y + 14}">${esc(t("c_no_nodes"))}${p.nodes && p.nodes.total ? ` · ${p.nodes.total} ${t("c_nodes")}` : ""}</text>`;
-    const bits = [t("c_mine", a.r, a.p)];
+  // 扇区按 log(1+x) 分角度：1000 多个节点里只占 1 个也看得见（实际数字在文字和提示里）
+  const R = 30, SW = 11, SZ = 2 * (R + SW / 2) + 4, CC = 2 * Math.PI * R;
+  const donut = (name, n, unit, mine) => {
+    const others = Math.max(n.alloc - mine, 0), m = Math.min(mine, n.alloc);
+    const segs = [[m, "var(--ok)", t("c_mine_use")], [others, "var(--c1)", t("c_others_use")],
+                  [n.idle, "var(--c-idle)", t("c_idle")], [n.other || 0, "url(#hatchDown)", t("c_down")]].filter(x => x[0] > 0);
+    const wsum = segs.reduce((a, x) => a + Math.log1p(x[0]), 0) || 1;
+    const gap = segs.length > 1 ? 2 : 0, cxy = SZ / 2;
+    let off = 0, arcs = "";
+    for (const [v, col, lab] of segs){
+      const len = Math.log1p(v) / wsum * CC;
+      arcs += `<circle cx="${cxy}" cy="${cxy}" r="${R}" fill="none" stroke="${col}" stroke-width="${SW}"`
+        + ` stroke-dasharray="${Math.max(len - gap, 1.5)} ${CC}" stroke-dashoffset="${-off}" transform="rotate(-90 ${cxy} ${cxy})"`
+        + `${tip(t("c_pie_tip", name, lab, v, n.total, unit))}/>`;
+      off += len;
+    }
+    const pct = n.total ? Math.round(n.alloc / n.total * 100) : 0;
+    return svg(SZ, SZ, `<defs><pattern id="hatchDown" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">`
+      + `<rect width="4" height="4" fill="var(--c-idle)"/><rect width="2" height="4" fill="var(--c-down)"/></pattern></defs>` + arcs
+      + `<text x="${cxy}" y="${cxy + 2}" text-anchor="middle" style="fill:var(--text);font-size:14px;font-weight:600">${pct}%</text>`
+      + `<text x="${cxy}" y="${cxy + 15}" text-anchor="middle" style="font-size:10px">${esc(t("c_used_pct"))}</text>`);
+  };
+  let anyPie = false;
+  const tiles = names.map(name => {
+    const p = (ov.partitions || {})[name] || {}, a = parts[name], mu = myUse[name] || {cpus: 0, nodes: 0};
+    // 有 CPU 数就按 CPU（共享节点上我的 job 只占一部分），否则按节点
+    const u = p.cpus && p.cpus.idle !== undefined ? [p.cpus, t("c_cpus"), mu.cpus]
+      : p.nodes && p.nodes.idle !== undefined ? [p.nodes, t("c_nodes"), mu.nodes] : null;
+    const pd = a.p - a.d - a.h - a.nv;
+    const mineLine = `${t("c_mine", `<span class="n-r">${a.r}</span>`, `<span class="${pd ? "n-pd" : ""}">${pd}</span>`)}`
+      + (a.d ? ` · <span class="dep-n">${esc(t("n_dep", a.d))}</span>` : "") + stuckTags(a.h, a.nv).replace(/ <span/g, " · <span");
+    const bits = [];
     if (p.all_pending !== undefined && p.all_pending !== null && !c.load_private) bits.push(t("c_queued", p.all_pending));
     if (a.ml) bits.push(t("c_wait", fmtH(a.ml.wait[1])));
-    body += `<text x="${TX}" y="${y + 14}">${esc(bits.join(" · "))}</text>`;
-    y += 24;
-  }
-  let out = names.length ? svg(W, y, body, true) + (anyBar ? legend([["", "background:var(--c1)", t("c_alloc")], ["", "background:var(--c3)", t("c_idle")], ["", "background:var(--c-down)", t("c_down")]]) : "")
+    let pie, useLine = "";
+    if (u){
+      anyPie = true;
+      const [n, unit, mine] = u;
+      pie = donut(name, n, unit, mine);
+      useLine = `<div>${esc(t("c_use_line", Math.min(mine, n.alloc), n.alloc, n.total, unit))}${n.other ? ` · ${esc(t("c_down"))} ${n.other}` : ""}</div>`;
+    } else {
+      pie = svg(SZ, SZ, `<circle cx="${SZ / 2}" cy="${SZ / 2}" r="${R}" fill="none" stroke="var(--c-idle)" stroke-width="${SW}" stroke-dasharray="4 3"`
+        + `${tip(t("c_no_nodes"))}/>`);
+      useLine = `<div>${esc(t("c_no_nodes"))}${p.nodes && p.nodes.total ? ` · ${p.nodes.total} ${t("c_nodes")}` : ""}</div>`;
+    }
+    return `<div class="pie">${pie}<div class="pt"><b>${esc(name)}</b><div>${mineLine}</div>${useLine}${bits.length ? `<div>${esc(bits.join(" · "))}</div>` : ""}</div></div>`;
+  });
+  let out = names.length ? `<div class="pies">${tiles.join("")}</div>`
+      + (anyPie ? legend([["", "background:var(--ok)", t("c_mine_use")], ["", "background:var(--c1)", t("c_others_use")],
+                          ["", "background:var(--c-idle);outline:1px solid var(--border)", t("c_idle")], ["hatch", "", t("c_down")]])
+        + `<div class="muted" style="margin:-4px 0 4px">${esc(t("c_pie_log"))}</div>` : "")
     : `<div class="empty">${t("no_qos")}</div>`;
   // 排位：一条“队伍”（最前面绿色 = 我在跑的，后面是排队的，蓝线 = 我的）+ 别人优先级的直方图（我的优先级在哪）
   const load = pn => ((rankBy[pn] || {}).n || 0) + (runBy[pn] || 0);
@@ -922,8 +983,8 @@ function cardChart(c, ov, rankBy, fsParts, runBy){
         const cls = st.competing ? rankCls(r.best.ahead, q) : "h-ok", col = cls === "h-ok" ? "var(--ok)" : cls === "h-mid" ? "var(--warn)" : "var(--bad)";
         rb += `<text x="${LX}" y="${ry + 27}" style="fill:${col};font-weight:600">#${r.best.ahead + 1} / ${q}</text>`;
       }
-      const a = parts[pn];  // 和上面分区条用同一个数（含等依赖的）
-      rb += `<text x="${LX}" y="${ry + (r ? 42 : 27)}">${esc(t("c_mine", a ? a.r : nr, a ? a.p : r ? r.n : 0))}</text>`;
+      const a = parts[pn];  // 和上面饼图旁边同一个数（不含等依赖 / 挂起 / 不会开始的）
+      rb += `<text x="${LX}" y="${ry + (r ? 42 : 27)}">${esc(t("c_mine", a ? a.r : nr, a ? a.p - a.d - a.h - a.nv : r ? r.n : 0))}</text>`;
       // 绿色段按“在跑的 + 排队的”比例画，至少 3px 看得见；没人排队就整条绿
       const gw = !nr ? 0 : !q ? BW : Math.min(Math.max(BW * nr / (nr + q), 3), BW - 8);
       if (gw) rb += `<rect x="${BX}" y="${ry + 3}" width="${gw}" height="11" rx="2" fill="var(--ok)"${tip(t("c_run_tip", pn, nr))}/>`;
@@ -974,12 +1035,14 @@ function renderGantt(groups){
   for (const g of groups){
     const run = g.jobs.filter(j => ACTIVE.has(j.state)), pend = g.jobs.filter(j => PEND.has(j.state));
     if (!run.length && !pend.length) continue;
-    const est = pend.find(j => j.ml_est && j.ml_est.start && !j.dep_wait) || pend.find(j => j.ml_est && j.ml_est.start) || null;
+    // 被挂起 / 不会开始的单独画（蓝 / 红），不参与预测和排序
+    const live = pend.filter(j => !j.never_run);
+    const est = live.find(j => j.ml_est && j.ml_est.start && !j.dep_wait) || live.find(j => j.ml_est && j.ml_est.start) || null;
     // 没有模型预测的排队组：有 Slurm 自己估计的开始时间就按它排，否则放最后
-    const slurmEst = Math.min(...pend.map(j => tms(j.start)).filter(v => v > 0), Infinity);
+    const slurmEst = Math.min(...live.map(j => tms(j.start)).filter(v => v > 0), Infinity);
     const key = run.length ? Math.min(...run.map(j => tms(j.start) || now)) - 1e13 : est ? tms(est.ml_est.start[1])
       : isFinite(slurmEst) ? slurmEst : 1e15;
-    rows.push({g, run, pend, est, key});
+    rows.push({g, run, pend, live, est, key});
   }
   rows.sort((a, b) => a.key - b.key);
   if (!rows.length){ wrap.innerHTML = `<div class="empty">${t("g_none")}</div>`; return; }
@@ -1000,10 +1063,13 @@ function renderGantt(groups){
     // 一道：单个 bar 和以前一样（y+4 高 12）；多道：每道高 5，间隔 7
     const lane = k => lanes <= 1 ? [y + 4, 12] : [y + 3 + k * 7, 5];
     const cnt = Object.entries(g.counts).map(([s, n]) => `${SHORT[s] || s}${n}`).join(" ");
-    const nRunT = r.run.reduce((a, j) => a + nT(j), 0), nPendT = r.pend.reduce((a, j) => a + nT(j), 0);
-    const cntLen = (nRunT ? `R${nRunT} ` : "").length + (nPendT ? `PD${nPendT}` : "").length;
+    const sumT = js => js.reduce((a, j) => a + nT(j), 0);
+    const nRunT = sumT(r.run), nPendT = sumT(r.live);
+    const nHeldT = sumT(r.pend.filter(j => j.held)), nNeverT = sumT(r.pend.filter(j => j.never_run && !j.held));
+    const cnts = [[nRunT, "R", "--ok"], [nPendT, "PD", "--warn"], [nHeldT, "H", "--held"], [nNeverT, "NR", "--bad"]].filter(c => c[0]);
+    const cntLen = cnts.map(([n, k]) => k + n).join(" ").length;
     const label = `${g.cluster} · ${g.name}`, maxCh = Math.max(Math.floor((LW - 10 - cntLen * 6.2) / 6.6), 4);
-    const cntTxt = (nRunT ? `<tspan style="fill:var(--ok)">R${nRunT}</tspan> ` : "") + (nPendT ? `<tspan style="fill:var(--warn)">PD${nPendT}</tspan>` : "");
+    const cntTxt = cnts.map(([n, k, v]) => `<tspan style="fill:var(${v})">${k}${n}</tspan>`).join(" ");
     b += `<g class="row" data-jump="${esc(jobKey(rep))}"><rect class="hl" x="0" y="${y}" width="${W}" height="${h}" fill="transparent"/>`
       + `<text class="lab" x="4" y="${y + 14}"${tip(`${label}  ×${g.nTasks}\n${cnt}\n${t("g_click")}`)}>${esc(label.length > maxCh ? label.slice(0, maxCh - 1) + "…" : label)}</text>`
       + `<text x="${LW - 6}" y="${y + 14}" text-anchor="end" style="font-size:11px">${cntTxt}</text>`;
@@ -1028,9 +1094,15 @@ function renderGantt(groups){
             + `<rect x="${cx(a)}" y="${ly}" width="${Math.max(cx(z) - cx(a), 2)}" height="${lh}" rx="2" fill="var(--warn)" opacity="${dep ? 0.12 : 0.32}"${dep ? ` stroke="var(--warn)" stroke-dasharray="3 2"` : ""}${tp}/>`
             + (m <= t1 ? `<rect x="${cx(m) - 1}" y="${ly - 1}" width="2.5" height="${lh + 2}" fill="var(--warn)"${tp}/>` : "");
         }
+      } else if (!r.live.length){
+        // 全是被挂起 / 不会开始的：从现在开始一条实心淡色条（蓝 = release 就能跑，红 = 要改 / 重交）
+        const p0 = r.pend[0], v = nNeverT ? "--bad" : "--held";
+        const tp = tip(`#${p0.id} ${t(nNeverT ? "g_never" : "g_held")}: ${p0.never_run}`
+          + (NEVER_TIP[p0.never_run] ? "\n" + t(NEVER_TIP[p0.never_run]) : "") + (nHeldT + nNeverT > 1 ? "\n" + t("g_pend_n", nHeldT + nNeverT) : ""));
+        b += `<rect x="${cx(now)}" y="${ly}" width="${Math.max(W - 8 - cx(now), 2)}" height="${lh}" rx="2" fill="var(${v})" fill-opacity="0.28" stroke="var(${v})" stroke-opacity="0.8"${tp}/>`;
       } else {
         // 没有模型预测（还没训练 / 这类 job 预测不了）：从现在开始一条虚线框，表示"在排队，什么时候开始不知道"
-        const p0 = r.pend[0], dep = r.pend.every(j => j.dep_wait);
+        const p0 = r.live[0], dep = r.live.every(j => j.dep_wait);
         const tp = tip(t("g_tip_pd_none", p0.id, nPendT, p0.reason || "-") + (p0.wait_est ? "\n" + t("w_backlog") + " " + fmtH(p0.wait_est.bottleneck.min) + " – " + fmtH(p0.wait_est.bottleneck.max) : ""));
         b += `<rect x="${cx(now)}" y="${ly}" width="${Math.max(W - 8 - cx(now), 2)}" height="${lh}" rx="2" fill="var(--warn)" fill-opacity="${dep ? 0.06 : 0.16}" stroke="var(--warn)" stroke-opacity="0.8" stroke-dasharray="3 2"${tp}/>`;
       }
@@ -1041,7 +1113,8 @@ function renderGantt(groups){
   const xn = x(now);
   b += `<line x1="${xn}" x2="${xn}" y1="-18" y2="${H}" stroke="var(--text)" stroke-dasharray="3 3"/><text x="${xn + 4}" y="-18" style="fill:var(--text)">${esc(t("g_now"))}</text>`;
   wrap.innerHTML = legend([["", "background:var(--ok)", t("g_running")], ["", "background:var(--warn);opacity:.5", t("g_pending")],
-                           ["", "border:1px dashed var(--warn)", t("g_dep")]])
+                           ["", "border:1px dashed var(--warn)", t("g_dep")], ["", "background:var(--held);opacity:.6", t("g_held")],
+                           ["", "background:var(--bad);opacity:.6", t("g_never")]])
     + `<div style="padding-top:28px">${svg(W, H + 4, b)}</div>` + (rows.length > MAX ? `<div class="more">${esc(t("g_more", rows.length - MAX))}</div>` : "");
 }
 
@@ -1209,6 +1282,7 @@ function whenCell(j){
   if (ACTIVE.has(j.state)) return `<span class="muted">${t("w_start")}</span> ${fmtTime(j.start)}`;
   if (PEND.has(j.state)){
     const base = (j.start ? `<span class="muted">${t("w_est")}</span> ${fmtTime(j.start)}` : `<span class="muted">${t("w_submit")}</span> ${fmtTime(j.submit)}`) + mlCell(j);
+    if (j.held) return `${base}<span class="est h-held" title="${esc(j.never_run + (NEVER_TIP[j.never_run] ? "\n" + t(NEVER_TIP[j.never_run]) : ""))}">${t("held_cell")}</span>`;
     if (j.never_run) return `${base}<span class="est h-bad" title="${esc(j.never_run + (NEVER_TIP[j.never_run] ? "\n" + t(NEVER_TIP[j.never_run]) : ""))}">${t("never_run_cell")}</span>`;
     // AssocGrpJobsLimit / QOSMaxGRESPerUser 这类：是你自己（或组）的额度满了，不是在等空位
     if (/^(Assoc|QOS)(Grp|Max)/.test(j.reason || "")){
@@ -1401,9 +1475,13 @@ const nCell = (v, cls) => v === null || v === undefined ? `<span class="n-0">—
 // 运行 / 排队；"我的"里等依赖的 job 不算排队，按依赖链的根放在括号里：
 // 根在跑的放运行数后面，根还在排队的放排队数后面：4 (+15) / 410 (+378)
 const depTag = (d, side) => d ? ` <span class="dep-n" title="${esc(t(side === "run" ? "dep_tip_run" : "dep_tip_queue"))}">(+${d})</span>` : "";
+// 挂起（蓝）/ 不会开始（红）：从排队数里拿出来单独显示
+const stuckTags = (h, nv) => (h ? ` <span class="n-held" title="${esc(t("held_tip"))}">${esc(t("n_held", h))}</span>` : "")
+  + (nv ? ` <span class="n-never" title="${esc(t("never_tip"))}">${esc(t("n_never", nv))}</span>` : "");
 const pairCell = (r, m) => {
   const pd = r[m + "_pending"], dep = r[m + "_dep"] || 0, depRun = r[m + "_dep_run"] || 0;
-  return `${nCell(r[m + "_running"], "n-r")}${depTag(depRun, "run")} / ${nCell(pd === null || pd === undefined ? pd : pd - dep, "n-pd")}${depTag(dep - depRun, "queue")}`;
+  const h = r[m + "_held"] || 0, nv = r[m + "_never"] || 0;
+  return `${nCell(r[m + "_running"], "n-r")}${depTag(depRun, "run")} / ${nCell(pd === null || pd === undefined ? pd : pd - dep - h - nv, "n-pd")}${depTag(dep - depRun, "queue")}${stuckTags(h, nv)}`;
 };
 // 节点 / CPU：已用 / 空闲 / 总数（只有 scontrol 时只有总数）
 const useCell = x => !x ? `<span class="n-0">—</span>` : x.idle === undefined ? `<span class="muted">${x.total}</span>`
@@ -1546,7 +1624,8 @@ function overviewCard(c){
   }
 
   const sum = k => (c.qos || []).reduce((a, q) => a + (q[k] || 0), 0);
-  const mr = sum("mine_running"), md = sum("mine_dep"), mdr = sum("mine_dep_run"), mp = sum("mine_pending") - md;
+  const mh = sum("mine_held"), mnv = sum("mine_never");
+  const mr = sum("mine_running"), md = sum("mine_dep"), mdr = sum("mine_dep_run"), mp = sum("mine_pending") - md - mh - mnv;
   // 积压：说明 / GPU 池 / 插队
   const bl = c.backlog;
   let foot = "";
@@ -1562,7 +1641,7 @@ function overviewCard(c){
   foot = fairshareLine(c) + foot;
   const blAt = bl && bl.fetched_at ? ` · ${t("bl_title")} ${localTime(bl.fetched_at)}` : "";
   return `<div class="card">
-    <div class="card-h">${dot}${esc(c.name)}${authTag}<span class="muted">${t("mine_summary", mr, mp, mdr, md - mdr)}</span><span class="muted at">${c.ok ? t("data_at", localTime(c.at)) + blAt : ""}</span></div>
+    <div class="card-h">${dot}${esc(c.name)}${authTag}<span class="muted">${t("mine_summary", mr, mp, mdr, md - mdr, mh, mnv)}</span><span class="muted at">${c.ok ? t("data_at", localTime(c.at)) + blAt : ""}</span></div>
     ${errHtml}
     ${ov.part_info || !parts.length ? "" : `<div class="stale-note" style="color:var(--muted)">${esc(t("part_no_info", c))}</div>`}
     ${isChart("ov") && vizOk ? cardChart(c, ov, rankBy, fsParts, runBy) : `<table class="qos">
@@ -1602,7 +1681,7 @@ function renderAlerts(){
   const path = a => `<span class="p" data-copy="${esc(a.dir)}" title="${t("click_copy_path")}">${esc(a.dir)}</span>`;
   const limitFiles = (lastData.settings || {}).dir_files_warn || 50;
   const item = a => a.type === "never_run"
-    ? `<div class="ai"><span class="k big">${t("al_never_run")}</span><b>${esc(a.cluster)}</b> ${esc(a.reason)}${NEVER_TIP[a.reason] ? ` <span class="muted">${t(NEVER_TIP[a.reason])}</span>` : ""}: ${jobLinks(a)}${a.stale ? ` <span class="muted">${t("al_stale")}</span>` : ""}${a.release ? ` <span class="muted">${t("al_release")}</span><span class="cmd" data-copy="${esc(a.release)}" data-copy-kind="cmd" title="${esc(t("al_release_tip"))}">${esc(a.release)}</span>` : ""}</div>`
+    ? `<div class="ai">${a.held ? `<span class="k held">${t("al_held")}</span>` : `<span class="k big">${t("al_never_run")}</span>`}<b>${esc(a.cluster)}</b> ${esc(a.reason)}${NEVER_TIP[a.reason] ? ` <span class="muted">${t(NEVER_TIP[a.reason])}</span>` : ""}: ${jobLinks(a)}${a.stale ? ` <span class="muted">${t("al_stale")}</span>` : ""}${a.release ? ` <span class="muted">${t("al_release")}</span><span class="cmd" data-copy="${esc(a.release)}" data-copy-kind="cmd" title="${esc(t("al_release_tip"))}">${esc(a.release)}</span>` : ""}</div>`
     : a.type === "slow_loop"
     ? `<div class="ai"><span class="k big">${t("al_slow_loop")}</span><b>${esc(a.cluster)}</b> ${esc(tr(a.reason))}: ${jobLinks(a)} ${path(a)}</div>`
     : a.type === "waitlog_full"
